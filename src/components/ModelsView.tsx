@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Check, Loader2, Lock, Search, Unlock } from 'lucide-react';
+import { useUiLang } from '../lib/i18n';
 import { isFreeOpenRouterModel } from '../types';
 import type { OpenRouterModel } from '../types';
 
@@ -24,6 +25,9 @@ export function ModelsView({
   onRequestUnlock,
   onLockPaid,
 }: ModelsViewProps) {
+  const { uiLang } = useUiLang();
+  const isEn = uiLang === 'en';
+
   const [search, setSearch] = useState('');
   const [priceFilter, setPriceFilter] = useState<PriceFilter>('all');
   const [showAll, setShowAll] = useState(false);
@@ -80,7 +84,7 @@ export function ModelsView({
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex flex-wrap items-center gap-3 flex-1 min-w-[260px]">
           <div className="relative flex-1 min-w-[220px] max-w-md">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"
               value={search}
@@ -88,21 +92,21 @@ export function ModelsView({
                 setSearch(e.target.value);
                 setShowAll(false);
               }}
-              placeholder="OpenRouter-Modelle filtern…"
-              className="w-full h-10 pl-9 pr-3 text-sm rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-blue-600"
+              placeholder={isEn ? 'Filter OpenRouter models…' : 'OpenRouter-Modelle filtern…'}
+              className="w-full h-10 pl-9 pr-3 text-sm rounded-md border border-neutral-300 dark:border-neutral-800 bg-white dark:bg-[#0A0D14] text-neutral-950 dark:text-neutral-100 focus:outline-none focus:border-neutral-950 dark:focus:border-white"
             />
           </div>
 
           <div
-            className="inline-flex items-center p-1 rounded-xl bg-white/90 dark:bg-[#0E131D] border border-slate-200/90 dark:border-slate-800 shadow-2xs"
+            className="inline-flex items-center p-0.5 rounded-md bg-white dark:bg-[#0A0D14] border border-neutral-300 dark:border-neutral-800 shadow-2xs"
             role="group"
-            aria-label="Preisfilter"
+            aria-label={isEn ? 'Price filter' : 'Preisfilter'}
           >
             {(
               [
-                { id: 'all', label: 'Alle', count: counts.all },
-                { id: 'free', label: 'Kostenlos', count: counts.free },
-                { id: 'paid', label: 'Kostenpflichtig', count: counts.paid },
+                { id: 'all', label: isEn ? 'All' : 'Alle', count: counts.all },
+                { id: 'free', label: isEn ? 'Free' : 'Kostenlos', count: counts.free },
+                { id: 'paid', label: isEn ? 'Paid' : 'Kostenpflichtig', count: counts.paid },
               ] as const
             ).map((item) => {
               const active = priceFilter === item.id;
@@ -114,10 +118,10 @@ export function ModelsView({
                     setPriceFilter(item.id);
                     setShowAll(false);
                   }}
-                  className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                  className={`px-3 py-1.5 text-xs font-medium rounded-sm transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                     active
-                      ? 'bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900'
-                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
+                      ? 'bg-neutral-950 dark:bg-white text-white dark:text-neutral-950 font-semibold'
+                      : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-950 dark:hover:text-neutral-100'
                   }`}
                 >
                   {item.label}
@@ -129,8 +133,9 @@ export function ModelsView({
         </div>
 
         <div className="flex flex-wrap items-center gap-3 shrink-0">
-          <div className="text-xs text-slate-500 dark:text-slate-400 tabular-nums">
-            Aktiv: <span className="font-mono text-slate-800 dark:text-slate-200">{activeModel}</span>
+          <div className="text-xs text-neutral-500 dark:text-neutral-400 tabular-nums">
+            {isEn ? 'Active:' : 'Aktiv:'}{' '}
+            <span className="font-mono text-neutral-900 dark:text-neutral-100">{activeModel}</span>
           </div>
 
           {paidModelsUnlocked ? (
@@ -138,50 +143,50 @@ export function ModelsView({
               type="button"
               disabled={locking}
               onClick={handleLockClick}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-emerald-200 dark:border-emerald-900/70 bg-emerald-50/70 dark:bg-emerald-950/30 text-emerald-800 dark:text-emerald-300 hover:bg-emerald-100/80 dark:hover:bg-emerald-950/60 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-emerald-300 dark:border-emerald-900/70 bg-emerald-50/70 dark:bg-emerald-950/30 text-emerald-800 dark:text-emerald-300 hover:bg-emerald-100/80 dark:hover:bg-emerald-950/60 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
             >
               {locking ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Unlock className="w-3.5 h-3.5" />}
-              Kostenpflichtige entsperrt · Sperren
+              {isEn ? 'Paid unlocked · Lock' : 'Kostenpflichtige entsperrt · Sperren'}
             </button>
           ) : (
             <button
               type="button"
               onClick={() => onRequestUnlock()}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-[#0A0D14] text-neutral-800 dark:text-neutral-200 hover:border-neutral-950 dark:hover:border-white transition-colors whitespace-nowrap shrink-0 cursor-pointer"
             >
-              <Lock className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
-              Kostenpflichtige entsperren
+              <Lock className="w-3.5 h-3.5 text-neutral-500 dark:text-neutral-400" />
+              {isEn ? 'Unlock paid models' : 'Kostenpflichtige entsperren'}
             </button>
           )}
         </div>
       </div>
 
-      <div className="border border-slate-200/90 dark:border-slate-800 rounded-2xl bg-white dark:bg-[#0E131D] shadow-[0_1px_2px_rgba(15,23,42,0.04),0_10px_28px_-14px_rgba(15,23,42,0.08)] overflow-x-auto">
+      <div className="border border-neutral-300/90 dark:border-neutral-800 rounded-lg bg-white dark:bg-[#0C1019] shadow-sm overflow-x-auto">
         <table className="w-full text-left border-collapse">
           <thead>
-            <tr className="border-b border-slate-200/90 dark:border-slate-800 bg-slate-50/70 dark:bg-[#0B0F17] text-xs font-medium text-slate-500 dark:text-slate-400">
-              <th className="py-3 px-4">Modell</th>
-              <th className="py-3 px-4">Kennung</th>
-              <th className="py-3 px-4 text-right">Kontext</th>
-              <th className="py-3 px-4 text-right">Eingabe / 1M</th>
-              <th className="py-3 px-4 text-right">Ausgabe / 1M</th>
-              <th className="py-3 px-4 text-right">Aktion</th>
+            <tr className="border-b border-neutral-200 dark:border-neutral-800 bg-[#FAFAFA] dark:bg-[#080B10] text-xs font-mono uppercase tracking-wider text-neutral-500 dark:text-neutral-400">
+              <th className="py-3 px-4">{isEn ? 'Model' : 'Modell'}</th>
+              <th className="py-3 px-4">{isEn ? 'Identifier' : 'Kennung'}</th>
+              <th className="py-3 px-4 text-right">{isEn ? 'Context' : 'Kontext'}</th>
+              <th className="py-3 px-4 text-right">{isEn ? 'Input / 1M' : 'Eingabe / 1M'}</th>
+              <th className="py-3 px-4 text-right">{isEn ? 'Output / 1M' : 'Ausgabe / 1M'}</th>
+              <th className="py-3 px-4 text-right">{isEn ? 'Action' : 'Aktion'}</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-sm">
+          <tbody className="divide-y divide-neutral-200 dark:divide-neutral-800 text-sm">
             {loading && models.length === 0 ? (
               <tr>
-                <td colSpan={6} className="py-10 text-center text-slate-500 dark:text-slate-400">
+                <td colSpan={6} className="py-10 text-center text-neutral-500 dark:text-neutral-400">
                   <span className="inline-flex items-center gap-2">
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    Modelle werden geladen…
+                    {isEn ? 'Loading models…' : 'Modelle werden geladen…'}
                   </span>
                 </td>
               </tr>
             ) : visibleModels.length === 0 ? (
               <tr>
-                <td colSpan={6} className="py-10 text-center text-slate-500 dark:text-slate-400">
-                  Keine Modelle gefunden.
+                <td colSpan={6} className="py-10 text-center text-neutral-500 dark:text-neutral-400">
+                  {isEn ? 'No models found.' : 'Keine Modelle gefunden.'}
                 </td>
               </tr>
             ) : (
@@ -195,31 +200,39 @@ export function ModelsView({
                     key={m.id}
                     className={`transition-colors ${
                       isActive
-                        ? 'bg-blue-50/50 dark:bg-blue-950/25'
-                        : 'hover:bg-slate-50 dark:hover:bg-slate-800/40'
+                        ? 'bg-neutral-100/80 dark:bg-neutral-800/40'
+                        : 'hover:bg-neutral-50 dark:hover:bg-neutral-800/25'
                     }`}
                   >
-                    <td className="py-2.5 px-4 font-medium text-slate-900 dark:text-slate-100 whitespace-nowrap">
+                    <td className="py-2.5 px-4 font-medium text-neutral-900 dark:text-neutral-100 whitespace-nowrap">
                       {m.name}
                     </td>
-                    <td className="py-2.5 px-4 font-mono text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">
+                    <td className="py-2.5 px-4 font-mono text-xs text-neutral-500 dark:text-neutral-400 whitespace-nowrap">
                       {m.id}
                     </td>
-                    <td className="py-2.5 px-4 text-right tabular-nums text-slate-700 dark:text-slate-300 whitespace-nowrap">
-                      {m.contextLength ? m.contextLength.toLocaleString('de-DE') : '—'}
+                    <td className="py-2.5 px-4 text-right tabular-nums text-neutral-700 dark:text-neutral-300 whitespace-nowrap">
+                      {m.contextLength ? m.contextLength.toLocaleString(isEn ? 'en-US' : 'de-DE') : '—'}
                     </td>
-                    <td className="py-2.5 px-4 text-right tabular-nums text-slate-700 dark:text-slate-300 whitespace-nowrap">
+                    <td className="py-2.5 px-4 text-right tabular-nums text-neutral-700 dark:text-neutral-300 whitespace-nowrap">
                       {m.promptPricePer1M < 0
-                        ? 'Variabel'
+                        ? isEn
+                          ? 'Variable'
+                          : 'Variabel'
                         : isFree
-                          ? 'Kostenlos'
+                          ? isEn
+                            ? 'Free'
+                            : 'Kostenlos'
                           : `$${m.promptPricePer1M.toFixed(2)}`}
                     </td>
-                    <td className="py-2.5 px-4 text-right tabular-nums text-slate-700 dark:text-slate-300 whitespace-nowrap">
+                    <td className="py-2.5 px-4 text-right tabular-nums text-neutral-700 dark:text-neutral-300 whitespace-nowrap">
                       {m.completionPricePer1M < 0
-                        ? 'Variabel'
+                        ? isEn
+                          ? 'Variable'
+                          : 'Variabel'
                         : isFree
-                          ? 'Kostenlos'
+                          ? isEn
+                            ? 'Free'
+                            : 'Kostenlos'
                           : `$${m.completionPricePer1M.toFixed(2)}`}
                     </td>
                     <td className="py-2.5 px-4 text-right whitespace-nowrap">
@@ -229,10 +242,10 @@ export function ModelsView({
                         onClick={() => handleChoose(m)}
                         className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors cursor-pointer ${
                           isActive
-                            ? 'text-emerald-700 dark:text-emerald-400 bg-transparent cursor-default'
+                            ? 'text-emerald-700 dark:text-emerald-400 bg-transparent cursor-default font-semibold'
                             : needsPassword
-                              ? 'border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
-                              : 'border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
+                              ? 'border border-neutral-300 dark:border-neutral-700 text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800'
+                              : 'border border-neutral-300 dark:border-neutral-700 text-neutral-900 dark:text-neutral-100 hover:border-neutral-950 dark:hover:border-white hover:bg-neutral-100 dark:hover:bg-neutral-800'
                         }`}
                       >
                         {isSaving ? (
@@ -240,13 +253,15 @@ export function ModelsView({
                         ) : isActive ? (
                           <>
                             <Check className="w-3.5 h-3.5" />
-                            Aktiv
+                            {isEn ? 'Active' : 'Aktiv'}
                           </>
                         ) : needsPassword ? (
                           <>
-                            <Lock className="w-3 h-3 text-slate-400 dark:text-slate-500" />
-                            Auswählen
+                            <Lock className="w-3 h-3 text-neutral-400 dark:text-neutral-500" />
+                            {isEn ? 'Select' : 'Auswählen'}
                           </>
+                        ) : isEn ? (
+                          'Select'
                         ) : (
                           'Auswählen'
                         )}
@@ -260,13 +275,13 @@ export function ModelsView({
         </table>
 
         {!showAll && filtered.length > 120 && (
-          <div className="px-4 py-3 border-t border-slate-200 dark:border-slate-800 flex items-center justify-center">
+          <div className="px-4 py-3 border-t border-neutral-200 dark:border-neutral-800 flex items-center justify-center">
             <button
               type="button"
               onClick={() => setShowAll(true)}
-              className="px-4 py-1.5 text-xs font-medium rounded-lg border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors cursor-pointer tabular-nums"
+              className="px-4 py-1.5 text-xs font-medium rounded-md border border-neutral-300 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200 hover:border-neutral-950 dark:hover:border-white transition-colors cursor-pointer tabular-nums"
             >
-              Alle {filtered.length} Modelle anzeigen
+              {isEn ? `Show all ${filtered.length} models` : `Alle ${filtered.length} Modelle anzeigen`}
             </button>
           </div>
         )}

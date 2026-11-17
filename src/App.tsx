@@ -11,6 +11,7 @@ import type { ActiveTab } from './components/TopBar';
 import { TranslateWorkspace } from './components/TranslateWorkspace';
 import { WriteWorkspace } from './components/WriteWorkspace';
 import {
+  clearAllLocalData,
   clearHistoryEntries,
   deleteHistoryEntry,
   fetchHistoryEntries,
@@ -23,6 +24,7 @@ import {
   saveWritingPreferences,
   unlockPaidModels,
 } from './lib/apiClient';
+import { UiLanguageContext } from './lib/i18n';
 import { DEFAULT_STARTER_RULES } from './types';
 import type {
   ChangeItem,
@@ -33,6 +35,7 @@ import type {
   SourceLanguageId,
   TargetLanguageId,
   TranslationTone,
+  UiLanguage,
   WritingPreferences,
   WritingStyleId,
 } from './types';
@@ -49,7 +52,29 @@ export default function App() {
   const [unlockModalOpen, setUnlockModalOpen] = useState(false);
   const [pendingUnlockModel, setPendingUnlockModel] = useState<OpenRouterModel | null>(null);
   const [pendingUnlockSlot, setPendingUnlockSlot] = useState<'primary' | 'secondary'>('primary');
-  const [darkMode, setDarkMode] = useState(false);
+  const [darkMode, setDarkMode] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    try {
+      const stored = window.localStorage.getItem('uxz_dark_mode');
+      if (stored === 'true') return true;
+      if (stored === 'false') return false;
+      return window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false;
+    } catch {
+      return false;
+    }
+  });
+  const [uiLang, setUiLang] = useState<UiLanguage>(() => {
+    if (typeof window === 'undefined') return 'de';
+    try {
+      const stored =
+        window.localStorage.getItem('uxz_ui_lang') ||
+        window.sessionStorage.getItem('uxz_ui_lang');
+      if (stored === 'en' || stored === 'de') return stored;
+      return 'de';
+    } catch {
+      return 'de';
+    }
+  });
 
   const [status, setStatus] = useState<OpenRouterStatus>({
     configured: false,
@@ -58,6 +83,7 @@ export default function App() {
     model: 'openrouter/free',
     dualReviewEnabled: false,
     secondaryModel: 'openrouter/free',
+    enforceZdr: false,
     paidModelsUnlocked: false,
     paidModelsPasswordConfigured: false,
     keyInfo: null,
@@ -93,7 +119,22 @@ export default function App() {
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', darkMode);
+    try {
+      window.localStorage.setItem('uxz_dark_mode', darkMode ? 'true' : 'false');
+    } catch {
+      // ignore storage errors
+    }
   }, [darkMode]);
+
+  useEffect(() => {
+    document.documentElement.lang = uiLang;
+    try {
+      window.localStorage.setItem('uxz_ui_lang', uiLang);
+      window.sessionStorage.setItem('uxz_ui_lang', uiLang);
+    } catch {
+      // ignore storage errors
+    }
+  }, [uiLang]);
 
   useEffect(() => {
     const onHashChange = () => {
@@ -197,6 +238,23 @@ export default function App() {
     setPreferences(saved);
   }
 
+  async function handleClearAllLocalData() {
+    const reset = await clearAllLocalData();
+    setStatus(reset.status);
+    setPreferences(reset.preferences);
+    setHistory([]);
+    setSourceText('');
+    setRefinedText('');
+    setChanges([]);
+    setTranslateSourceText('');
+    setTranslateTargetText('');
+    setTranslateChanges([]);
+    const prefersDark =
+      typeof window !== 'undefined' && (window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false);
+    setDarkMode(prefersDark);
+    setUiLang('de');
+  }
+
   function handleRequestUnlock(model?: OpenRouterModel, slot: 'primary' | 'secondary' = 'primary') {
     setPendingUnlockModel(model ?? null);
     setPendingUnlockSlot(slot);
@@ -267,6 +325,7 @@ export default function App() {
     preferences.rules.filter((r) => r.enabled).length;
 
   return (
+    <UiLanguageContext.Provider value={{ uiLang, setUiLang }}>
     <div className="min-h-screen flex flex-col bg-[#F8F9FA] dark:bg-[#090C12] bg-grid-pattern text-neutral-900 dark:text-neutral-100 transition-colors">
       <TopBar
         activeTab={activeTab}
@@ -365,6 +424,7 @@ export default function App() {
           <PrivacyView
             onBackToEditor={() => handleSelectTab('editor')}
             onOpenSettings={() => setSettingsOpen(true)}
+            onClearAllData={handleClearAllLocalData}
           />
         )}
       </main>
@@ -372,7 +432,9 @@ export default function App() {
       <footer className="border-t border-neutral-200/80 dark:border-neutral-800/80 bg-white/80 dark:bg-[#0A0D14]/80 backdrop-blur-sm">
         <div className="max-w-[1440px] mx-auto px-4 sm:px-6 py-2.5 flex flex-wrap items-center justify-between gap-3 text-[11.5px] leading-snug text-neutral-500 dark:text-neutral-400">
           <span>
-            Kein eigenes Tracking – alle Einstellungen &amp; Keys bleiben lokal im Browser.
+            {uiLang === 'en'
+              ? 'No self-hosted tracking — all settings & keys stay local in your browser.'
+              : 'Kein eigenes Tracking – alle Einstellungen & Keys bleiben lokal im Browser.'}
           </span>
           <div className="flex items-center gap-4 shrink-0">
             <button
@@ -384,7 +446,7 @@ export default function App() {
                   : 'text-neutral-700 dark:text-neutral-300 hover:text-neutral-950 dark:hover:text-white'
               }`}
             >
-              Datenschutz &amp; Datenflüsse
+              {uiLang === 'en' ? 'Privacy & Data Flows' : 'Datenschutz & Datenflüsse'}
             </button>
             <a
               href="https://michaelfoertsch.de/impressum.html"
@@ -392,7 +454,7 @@ export default function App() {
               rel="noopener noreferrer"
               className="font-medium text-neutral-700 dark:text-neutral-300 hover:text-neutral-950 dark:hover:text-white underline underline-offset-4 transition-colors whitespace-nowrap"
             >
-              Impressum
+              {uiLang === 'en' ? 'Imprint' : 'Impressum'}
             </a>
           </div>
         </div>
@@ -407,6 +469,7 @@ export default function App() {
         onStatusUpdated={setStatus}
         onRequestUnlock={handleRequestUnlock}
         onLockPaid={handleLockPaid}
+        onClearAllData={handleClearAllLocalData}
       />
 
       <SettingsModal
@@ -427,5 +490,6 @@ export default function App() {
         onUnlock={handleUnlockPaid}
       />
     </div>
+    </UiLanguageContext.Provider>
   );
 }

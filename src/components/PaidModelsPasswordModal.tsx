@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import { Eye, EyeOff, Loader2, Lock, X } from 'lucide-react';
 import { motion } from 'motion/react';
+import { useUiLang } from '../lib/i18n';
 import type { OpenRouterModel } from '../types';
 
 interface PaidModelsPasswordModalProps {
@@ -19,6 +20,9 @@ export function PaidModelsPasswordModal({
   onClose,
   onUnlock,
 }: PaidModelsPasswordModalProps) {
+  const { uiLang } = useUiLang();
+  const isEn = uiLang === 'en';
+
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -45,17 +49,21 @@ export function PaidModelsPasswordModal({
     setError(null);
 
     if (!password) {
-      setError('Bitte gib ein Passwort ein.');
+      setError(isEn ? 'Please enter a password.' : 'Bitte gib ein Passwort ein.');
       return;
     }
 
     if (!passwordConfigured) {
       if (password.length < 6) {
-        setError('Das Passwort muss mindestens 6 Zeichen lang sein.');
+        setError(
+          isEn
+            ? 'Password must be at least 6 characters long.'
+            : 'Das Passwort muss mindestens 6 Zeichen lang sein.'
+        );
         return;
       }
       if (password !== confirmPassword) {
-        setError('Die Passwörter stimmen nicht überein.');
+        setError(isEn ? 'Passwords do not match.' : 'Die Passwörter stimmen nicht überein.');
         return;
       }
     }
@@ -78,13 +86,13 @@ export function PaidModelsPasswordModal({
       className="fixed inset-0 z-[60] flex items-center justify-center p-4"
       role="dialog"
       aria-modal="true"
-      aria-label="Kostenpflichtige Modelle entsperren"
+      aria-label={isEn ? 'Unlock paid models' : 'Kostenpflichtige Modelle entsperren'}
     >
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ duration: 0.15 }}
-        className="fixed inset-0 bg-slate-950/45 backdrop-blur-[2px]"
+        className="fixed inset-0 bg-neutral-950/50 backdrop-blur-[2px]"
         onClick={onClose}
         aria-hidden="true"
       />
@@ -93,22 +101,26 @@ export function PaidModelsPasswordModal({
         initial={{ opacity: 0, scale: 0.97, y: 6 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         transition={{ duration: 0.16, ease: [0.16, 1, 0.3, 1] }}
-        className="relative z-10 w-full max-w-md rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#0D1119] shadow-2xl overflow-hidden"
+        className="relative z-10 w-full max-w-md rounded-lg border border-neutral-300 dark:border-neutral-800 bg-white dark:bg-[#0D1119] shadow-2xl overflow-hidden"
       >
-        <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3">
+        <div className="px-5 py-4 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2.5 min-w-0">
-            <Lock className="w-4 h-4 text-blue-700 dark:text-blue-400 shrink-0" />
-            <h2 className="font-display text-sm font-semibold tracking-tight text-slate-950 dark:text-white truncate">
+            <Lock className="w-4 h-4 text-neutral-950 dark:text-white shrink-0" />
+            <h2 className="font-display text-sm font-semibold tracking-tight text-neutral-950 dark:text-white truncate">
               {passwordConfigured
-                ? 'Kostenpflichtige Modelle entsperren'
-                : 'Passwort für kostenpflichtige Modelle'}
+                ? isEn
+                  ? 'Unlock paid models'
+                  : 'Kostenpflichtige Modelle entsperren'
+                : isEn
+                  ? 'Password for paid models'
+                  : 'Passwort für kostenpflichtige Modelle'}
             </h2>
           </div>
           <button
             type="button"
             onClick={onClose}
-            aria-label="Schließen"
-            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-800 hover:bg-slate-100 dark:hover:text-slate-100 dark:hover:bg-slate-800 cursor-pointer shrink-0"
+            aria-label={isEn ? 'Close' : 'Schließen'}
+            className="p-1.5 rounded-md text-neutral-500 hover:text-neutral-950 hover:bg-neutral-100 dark:hover:text-neutral-100 dark:hover:bg-neutral-800 cursor-pointer shrink-0"
           >
             <X className="w-4 h-4" />
           </button>
@@ -116,11 +128,13 @@ export function PaidModelsPasswordModal({
 
         <form onSubmit={handleSubmit} className="p-5 space-y-4">
           {pendingModel && (
-            <div className="flex items-center justify-between gap-3 text-xs text-slate-600 dark:text-slate-300 pb-3 border-b border-slate-200/80 dark:border-slate-800">
+            <div className="flex items-center justify-between gap-3 text-xs text-neutral-600 dark:text-neutral-300 pb-3 border-b border-neutral-200 dark:border-neutral-800">
               <span className="font-medium truncate">{pendingModel.name}</span>
-              <span className="font-mono tabular-nums text-slate-500 dark:text-slate-400 shrink-0">
+              <span className="font-mono tabular-nums text-neutral-500 dark:text-neutral-400 shrink-0">
                 {pendingModel.promptPricePer1M < 0
-                  ? 'Variabel'
+                  ? isEn
+                    ? 'Variable'
+                    : 'Variabel'
                   : `$${pendingModel.promptPricePer1M.toFixed(2)} / $${pendingModel.completionPricePer1M.toFixed(2)}`}
               </span>
             </div>
@@ -129,9 +143,15 @@ export function PaidModelsPasswordModal({
           <div className="space-y-1.5">
             <label
               htmlFor="paid-models-password"
-              className="block text-xs font-medium text-slate-700 dark:text-slate-300"
+              className="block text-xs font-medium text-neutral-700 dark:text-neutral-300"
             >
-              {passwordConfigured ? 'Passwort' : 'Neues Passwort (mind. 6 Zeichen)'}
+              {passwordConfigured
+                ? isEn
+                  ? 'Password'
+                  : 'Passwort'
+                : isEn
+                  ? 'New password (min. 6 characters)'
+                  : 'Neues Passwort (mind. 6 Zeichen)'}
             </label>
             <div className="relative">
               <input
@@ -142,13 +162,21 @@ export function PaidModelsPasswordModal({
                 autoFocus
                 autoComplete={passwordConfigured ? 'current-password' : 'new-password'}
                 placeholder="••••••••"
-                className="w-full h-10 pl-3 pr-10 text-sm rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-blue-600"
+                className="w-full h-10 pl-3 pr-10 text-sm rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-950 dark:text-neutral-100 focus:outline-none focus:border-neutral-950 dark:focus:border-white"
               />
               <button
                 type="button"
                 onClick={() => setShowPassword((v) => !v)}
-                aria-label={showPassword ? 'Passwort verbergen' : 'Passwort anzeigen'}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 cursor-pointer"
+                aria-label={
+                  showPassword
+                    ? isEn
+                      ? 'Hide password'
+                      : 'Passwort verbergen'
+                    : isEn
+                      ? 'Show password'
+                      : 'Passwort anzeigen'
+                }
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-neutral-400 hover:text-neutral-800 dark:hover:text-neutral-200 cursor-pointer"
               >
                 {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>
@@ -159,9 +187,9 @@ export function PaidModelsPasswordModal({
             <div className="space-y-1.5">
               <label
                 htmlFor="paid-models-password-confirm"
-                className="block text-xs font-medium text-slate-700 dark:text-slate-300"
+                className="block text-xs font-medium text-neutral-700 dark:text-neutral-300"
               >
-                Passwort bestätigen
+                {isEn ? 'Confirm password' : 'Passwort bestätigen'}
               </label>
               <input
                 id="paid-models-password-confirm"
@@ -170,13 +198,13 @@ export function PaidModelsPasswordModal({
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 autoComplete="new-password"
                 placeholder="••••••••"
-                className="w-full h-10 px-3 text-sm rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-blue-600"
+                className="w-full h-10 px-3 text-sm rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-950 dark:text-neutral-100 focus:outline-none focus:border-neutral-950 dark:focus:border-white"
               />
             </div>
           )}
 
           {error && (
-            <div className="p-3 rounded-lg border border-rose-200 dark:border-rose-900/70 bg-rose-50 dark:bg-rose-950/40 text-xs text-rose-800 dark:text-rose-200">
+            <div className="p-3 rounded-md border border-rose-200 dark:border-rose-900/70 bg-rose-50 dark:bg-rose-950/40 text-xs text-rose-800 dark:text-rose-200">
               {error}
             </div>
           )}
@@ -185,17 +213,23 @@ export function PaidModelsPasswordModal({
             <button
               type="button"
               onClick={onClose}
-              className="h-9 px-3.5 text-xs font-medium rounded-lg border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 whitespace-nowrap shrink-0 cursor-pointer"
+              className="h-9 px-3.5 text-xs font-medium rounded-md border border-neutral-300 dark:border-neutral-700 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800 whitespace-nowrap shrink-0 cursor-pointer"
             >
-              Abbrechen
+              {isEn ? 'Cancel' : 'Abbrechen'}
             </button>
             <button
               type="submit"
               disabled={submitting}
-              className="h-9 px-4 inline-flex items-center gap-1.5 text-xs font-medium rounded-lg bg-blue-700 dark:bg-blue-600 text-white hover:bg-blue-800 dark:hover:bg-blue-500 disabled:opacity-50 whitespace-nowrap shrink-0 cursor-pointer"
+              className="h-9 px-4 inline-flex items-center gap-1.5 text-xs font-semibold rounded-md bg-neutral-950 dark:bg-white text-white dark:text-neutral-950 hover:bg-neutral-800 dark:hover:bg-neutral-200 disabled:opacity-50 whitespace-nowrap shrink-0 cursor-pointer"
             >
               {submitting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-              {passwordConfigured ? 'Entsperren' : 'Festlegen & entsperren'}
+              {passwordConfigured
+                ? isEn
+                  ? 'Unlock'
+                  : 'Entsperren'
+                : isEn
+                  ? 'Set & unlock'
+                  : 'Festlegen & entsperren'}
             </button>
           </div>
         </form>

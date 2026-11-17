@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import { Check, Download, Pencil, Plus, Trash2, Upload, X } from 'lucide-react';
+import { useUiLang } from '../lib/i18n';
 import type { ProtectedTerm, WritingPreferences, WritingRule } from '../types';
 
 interface PreferencesViewProps {
@@ -13,6 +14,9 @@ export function PreferencesView({
   loading,
   onUpdatePreferences,
 }: PreferencesViewProps) {
+  const { uiLang } = useUiLang();
+  const isEn = uiLang === 'en';
+
   const [termInput, setTermInput] = useState('');
   const [termCaseSensitive, setTermCaseSensitive] = useState(true);
 
@@ -148,7 +152,7 @@ export function PreferencesView({
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = 'highl-write-woerterbuch-regeln.json';
+    link.download = isEn ? 'uxz-write-glossary-rules.json' : 'uxz-write-woerterbuch-regeln.json';
     link.click();
     URL.revokeObjectURL(url);
   }
@@ -163,7 +167,7 @@ export function PreferencesView({
       const text = await file.text();
       const parsed = JSON.parse(text) as Partial<WritingPreferences>;
       if (!parsed || typeof parsed !== 'object') {
-        setImportError('Ungültiges Dateiformat.');
+        setImportError(isEn ? 'Invalid file format.' : 'Ungültiges Dateiformat.');
         return;
       }
 
@@ -190,19 +194,21 @@ export function PreferencesView({
         : preferences.rules;
 
       await onUpdatePreferences({
+        ...preferences,
         terms: incomingTerms,
         rules: incomingRules,
+        settings: preferences.settings,
       });
     } catch {
-      setImportError('Datei konnte nicht gelesen werden.');
+      setImportError(isEn ? 'Could not read file.' : 'Datei konnte nicht gelesen werden.');
     }
   }
 
   return (
     <div className="max-w-[1440px] mx-auto px-4 sm:px-6 py-6 space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="font-display text-lg font-semibold tracking-tight text-slate-950 dark:text-white">
-          Wörterbuch &amp; Regeln
+        <h1 className="font-display text-lg font-semibold tracking-tight text-neutral-950 dark:text-white">
+          {isEn ? 'Glossary & Rules' : 'Wörterbuch & Regeln'}
         </h1>
 
         <div className="flex items-center gap-2">
@@ -216,36 +222,36 @@ export function PreferencesView({
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-[#101623] text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-900 transition-colors cursor-pointer"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-neutral-300 dark:border-neutral-800 bg-white dark:bg-[#0A0D14] text-neutral-700 dark:text-neutral-300 hover:border-neutral-900 dark:hover:border-neutral-100 hover:text-neutral-950 dark:hover:text-white transition-colors cursor-pointer"
           >
             <Upload className="w-3.5 h-3.5" />
-            Importieren
+            {isEn ? 'Import' : 'Importieren'}
           </button>
           <button
             type="button"
             onClick={handleExportJson}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-[#101623] text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-900 transition-colors cursor-pointer"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-neutral-300 dark:border-neutral-800 bg-white dark:bg-[#0A0D14] text-neutral-700 dark:text-neutral-300 hover:border-neutral-900 dark:hover:border-neutral-100 hover:text-neutral-950 dark:hover:text-white transition-colors cursor-pointer"
           >
             <Download className="w-3.5 h-3.5" />
-            Exportieren
+            {isEn ? 'Export' : 'Exportieren'}
           </button>
         </div>
       </div>
 
       {importError && (
-        <div className="px-4 py-2.5 rounded-xl border border-rose-200 dark:border-rose-900/70 bg-rose-50 dark:bg-rose-950/35 text-xs text-rose-800 dark:text-rose-200">
+        <div className="px-4 py-2.5 rounded-lg border border-rose-200 dark:border-rose-900/70 bg-rose-50 dark:bg-rose-950/35 text-xs text-rose-800 dark:text-rose-200">
           {importError}
         </div>
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
         {/* Geschützte Begriffe (Wörterbuch) */}
-        <section className="border border-slate-200/90 dark:border-slate-800 rounded-2xl bg-white dark:bg-[#101623] shadow-2xs overflow-hidden">
-          <div className="h-12 px-5 border-b border-slate-200/80 dark:border-slate-800/90 flex items-center justify-between gap-3 bg-[#FAFBFD] dark:bg-[#0B0F17]">
-            <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-              Geschützte Begriffe
+        <section className="border border-neutral-300/90 dark:border-neutral-800 rounded-lg bg-white dark:bg-[#0C1019] shadow-sm overflow-hidden">
+          <div className="h-12 px-5 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between gap-3 bg-[#FAFAFA] dark:bg-[#080B10]">
+            <h2 className="text-sm font-semibold text-neutral-950 dark:text-neutral-100">
+              {isEn ? 'Protected Terms' : 'Geschützte Begriffe'}
             </h2>
-            <span className="text-xs font-mono tabular-nums text-slate-500 dark:text-slate-400">
+            <span className="text-xs font-mono tabular-nums text-neutral-500 dark:text-neutral-400">
               {activeTermCount} / {preferences.terms.length}
             </span>
           </div>
@@ -256,19 +262,23 @@ export function PreferencesView({
                 type="text"
                 value={termInput}
                 onChange={(e) => setTermInput(e.target.value)}
-                placeholder="Begriff(e) eingeben (z. B. HighL Write, OpenRouter)…"
-                className="flex-1 min-w-0 h-10 px-3 text-sm rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-blue-600"
+                placeholder={
+                  isEn
+                    ? 'Enter term(s) (e.g. Üxz Write, OpenRouter)…'
+                    : 'Begriff(e) eingeben (z. B. Üxz Write, OpenRouter)…'
+                }
+                className="flex-1 min-w-0 h-10 px-3 text-sm rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-950 dark:text-neutral-100 focus:outline-none focus:border-neutral-950 dark:focus:border-white"
               />
               <button
                 type="button"
                 onClick={() => setTermCaseSensitive((v) => !v)}
                 aria-pressed={termCaseSensitive}
-                aria-label="Exakte Groß- und Kleinschreibung"
-                title="Exakte Groß-/Kleinschreibung"
-                className={`h-10 px-3 text-xs font-mono font-semibold rounded-lg border transition-colors shrink-0 cursor-pointer ${
+                aria-label={isEn ? 'Exact case matching' : 'Exakte Groß- und Kleinschreibung'}
+                title={isEn ? 'Exact case matching' : 'Exakte Groß-/Kleinschreibung'}
+                className={`h-10 px-3 text-xs font-mono font-semibold rounded-md border transition-colors shrink-0 cursor-pointer ${
                   termCaseSensitive
-                    ? 'border-blue-600 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-400'
-                    : 'border-slate-300 dark:border-slate-700 text-slate-500 dark:text-slate-400'
+                    ? 'border-neutral-950 dark:border-white bg-neutral-950 dark:bg-white text-white dark:text-neutral-950'
+                    : 'border-neutral-300 dark:border-neutral-700 text-neutral-500 dark:text-neutral-400 hover:border-neutral-600'
                 }`}
               >
                 Aa
@@ -276,19 +286,19 @@ export function PreferencesView({
               <button
                 type="submit"
                 disabled={!termInput.trim() || loading}
-                className="h-10 px-4 inline-flex items-center gap-1.5 text-xs font-medium rounded-lg bg-blue-700 dark:bg-blue-600 text-white hover:bg-blue-800 dark:hover:bg-blue-500 disabled:opacity-45 disabled:cursor-not-allowed whitespace-nowrap shrink-0 cursor-pointer"
+                className="h-10 px-4 inline-flex items-center gap-1.5 text-xs font-semibold rounded-md bg-neutral-950 dark:bg-white text-white dark:text-neutral-950 hover:bg-neutral-800 dark:hover:bg-neutral-200 disabled:opacity-45 disabled:cursor-not-allowed whitespace-nowrap shrink-0 cursor-pointer"
               >
                 <Plus className="w-3.5 h-3.5" />
-                Hinzufügen
+                {isEn ? 'Add' : 'Hinzufügen'}
               </button>
             </form>
 
             {preferences.terms.length === 0 ? (
-              <div className="py-10 text-center text-sm text-slate-400 dark:text-slate-600 border border-dashed border-slate-200 dark:border-slate-800 rounded-xl">
-                Noch keine geschützten Begriffe hinterlegt
+              <div className="py-10 text-center text-sm text-neutral-400 dark:text-neutral-600 border border-dashed border-neutral-300 dark:border-neutral-800 rounded-lg">
+                {isEn ? 'No protected terms saved yet' : 'Noch keine geschützten Begriffe hinterlegt'}
               </div>
             ) : (
-              <ul className="border border-slate-200 dark:border-slate-800 rounded-xl divide-y divide-slate-200 dark:divide-slate-800 max-h-[480px] overflow-y-auto">
+              <ul className="border border-neutral-200 dark:border-neutral-800 rounded-lg divide-y divide-neutral-200 dark:divide-neutral-800 max-h-[480px] overflow-y-auto">
                 {preferences.terms.map((item) => (
                   <li
                     key={item.id}
@@ -301,15 +311,15 @@ export function PreferencesView({
                         type="button"
                         onClick={() => handleToggleTerm(item.id)}
                         aria-pressed={item.enabled}
-                        className={`px-2 py-0.5 text-[11px] font-medium rounded-md border transition-colors shrink-0 cursor-pointer ${
+                        className={`px-2 py-0.5 text-[11px] font-medium rounded-sm border transition-colors shrink-0 cursor-pointer ${
                           item.enabled
-                            ? 'border-blue-600/30 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-400'
-                            : 'border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400'
+                            ? 'border-neutral-950 dark:border-white bg-neutral-950 dark:bg-white text-white dark:text-neutral-950 font-semibold'
+                            : 'border-neutral-300 dark:border-neutral-700 text-neutral-500 dark:text-neutral-400'
                         }`}
                       >
-                        {item.enabled ? 'Aktiv' : 'Aus'}
+                        {item.enabled ? (isEn ? 'On' : 'Aktiv') : isEn ? 'Off' : 'Aus'}
                       </button>
-                      <span className="text-sm font-medium text-slate-900 dark:text-slate-100 truncate">
+                      <span className="text-sm font-medium text-neutral-900 dark:text-neutral-100 truncate">
                         {item.term}
                       </span>
                     </div>
@@ -319,11 +329,11 @@ export function PreferencesView({
                         type="button"
                         onClick={() => handleToggleTermCase(item.id)}
                         aria-pressed={item.caseSensitive}
-                        aria-label="Exakte Schreibweise umschalten"
-                        className={`px-2 py-1 text-[11px] font-mono rounded-md border transition-colors cursor-pointer ${
+                        aria-label={isEn ? 'Toggle exact case matching' : 'Exakte Schreibweise umschalten'}
+                        className={`px-2 py-1 text-[11px] font-mono rounded-sm border transition-colors cursor-pointer ${
                           item.caseSensitive
-                            ? 'border-slate-300 dark:border-slate-600 text-slate-800 dark:text-slate-200 bg-slate-100 dark:bg-slate-800'
-                            : 'border-transparent text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+                            ? 'border-neutral-300 dark:border-neutral-600 text-neutral-900 dark:text-neutral-100 bg-neutral-100 dark:bg-neutral-800'
+                            : 'border-transparent text-neutral-400 dark:text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200'
                         }`}
                       >
                         Aa
@@ -331,8 +341,8 @@ export function PreferencesView({
                       <button
                         type="button"
                         onClick={() => handleDeleteTerm(item.id)}
-                        aria-label="Begriff entfernen"
-                        className="p-1.5 rounded-md text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                        aria-label={isEn ? 'Remove term' : 'Begriff entfernen'}
+                        className="p-1.5 rounded-sm text-neutral-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -345,12 +355,12 @@ export function PreferencesView({
         </section>
 
         {/* Verbindliche Schreib- & Formatierungsregeln */}
-        <section className="border border-slate-200/90 dark:border-slate-800 rounded-2xl bg-white dark:bg-[#101623] shadow-2xs overflow-hidden">
-          <div className="h-12 px-5 border-b border-slate-200/80 dark:border-slate-800/90 flex items-center justify-between gap-3 bg-[#FAFBFD] dark:bg-[#0B0F17]">
-            <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-              Schreib- &amp; Formatierungsregeln
+        <section className="border border-neutral-300/90 dark:border-neutral-800 rounded-lg bg-white dark:bg-[#0C1019] shadow-sm overflow-hidden">
+          <div className="h-12 px-5 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between gap-3 bg-[#FAFAFA] dark:bg-[#080B10]">
+            <h2 className="text-sm font-semibold text-neutral-950 dark:text-neutral-100">
+              {isEn ? 'Writing & Formatting Rules' : 'Schreib- & Formatierungsregeln'}
             </h2>
-            <span className="text-xs font-mono tabular-nums text-slate-500 dark:text-slate-400">
+            <span className="text-xs font-mono tabular-nums text-neutral-500 dark:text-neutral-400">
               {activeRuleCount} / {preferences.rules.length}
             </span>
           </div>
@@ -361,34 +371,42 @@ export function PreferencesView({
                 type="text"
                 value={ruleTitle}
                 onChange={(e) => setRuleTitle(e.target.value)}
-                placeholder="Regelname (z. B. Bindestrich-Komposita)"
-                className="w-full h-9 px-3 text-sm rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-blue-600"
+                placeholder={
+                  isEn
+                    ? 'Rule name (e.g. Preserve em-dash parentheticals)'
+                    : 'Regelname (z. B. Bindestrich-Komposita)'
+                }
+                className="w-full h-9 px-3 text-sm rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-950 dark:text-neutral-100 focus:outline-none focus:border-neutral-950 dark:focus:border-white"
               />
               <div className="flex items-start gap-2">
                 <textarea
                   rows={2}
                   value={ruleInstruction}
                   onChange={(e) => setRuleInstruction(e.target.value)}
-                  placeholder="Genaue Regel definieren (z. B. Einschübe zwischen – bleiben zwischen –)…"
-                  className="flex-1 min-w-0 p-2.5 text-sm rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-blue-600 resize-y"
+                  placeholder={
+                    isEn
+                      ? 'Define exact rule (e.g. Keep phrases between dashes inside dashes)…'
+                      : 'Genaue Regel definieren (z. B. Einschübe zwischen – bleiben zwischen –)…'
+                  }
+                  className="flex-1 min-w-0 p-2.5 text-sm rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-950 dark:text-neutral-100 focus:outline-none focus:border-neutral-950 dark:focus:border-white resize-y"
                 />
                 <button
                   type="submit"
                   disabled={!ruleInstruction.trim() || loading}
-                  className="h-10 px-4 inline-flex items-center gap-1.5 text-xs font-medium rounded-lg bg-blue-700 dark:bg-blue-600 text-white hover:bg-blue-800 dark:hover:bg-blue-500 disabled:opacity-45 disabled:cursor-not-allowed whitespace-nowrap shrink-0 cursor-pointer"
+                  className="h-10 px-4 inline-flex items-center gap-1.5 text-xs font-semibold rounded-md bg-neutral-950 dark:bg-white text-white dark:text-neutral-950 hover:bg-neutral-800 dark:hover:bg-neutral-200 disabled:opacity-45 disabled:cursor-not-allowed whitespace-nowrap shrink-0 cursor-pointer"
                 >
                   <Plus className="w-3.5 h-3.5" />
-                  Speichern
+                  {isEn ? 'Save' : 'Speichern'}
                 </button>
               </div>
             </form>
 
             {preferences.rules.length === 0 ? (
-              <div className="py-10 text-center text-sm text-slate-400 dark:text-slate-600 border border-dashed border-slate-200 dark:border-slate-800 rounded-xl">
-                Noch keine Regeln definiert
+              <div className="py-10 text-center text-sm text-neutral-400 dark:text-neutral-600 border border-dashed border-neutral-300 dark:border-neutral-800 rounded-lg">
+                {isEn ? 'No rules defined yet' : 'Noch keine Regeln definiert'}
               </div>
             ) : (
-              <ul className="border border-slate-200 dark:border-slate-800 rounded-xl divide-y divide-slate-200 dark:divide-slate-800 max-h-[520px] overflow-y-auto">
+              <ul className="border border-neutral-200 dark:border-neutral-800 rounded-lg divide-y divide-neutral-200 dark:divide-neutral-800 max-h-[520px] overflow-y-auto">
                 {preferences.rules.map((rule) => {
                   const isEditing = editingRuleId === rule.id;
                   return (
@@ -404,40 +422,40 @@ export function PreferencesView({
                             type="text"
                             value={editRuleTitle}
                             onChange={(e) => setEditRuleTitle(e.target.value)}
-                            className="w-full h-9 px-3 text-sm font-medium rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-blue-600"
+                            className="w-full h-9 px-3 text-sm font-medium rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-950 dark:text-neutral-100 focus:outline-none focus:border-neutral-950 dark:focus:border-white"
                           />
                           <textarea
                             rows={3}
                             value={editRuleInstruction}
                             onChange={(e) => setEditRuleInstruction(e.target.value)}
-                            className="w-full p-2.5 text-sm rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-blue-600"
+                            className="w-full p-2.5 text-sm rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-950 dark:text-neutral-100 focus:outline-none focus:border-neutral-950 dark:focus:border-white"
                           />
                           <div className="flex items-center justify-end gap-2">
                             <button
                               type="button"
                               onClick={() => setEditingRuleId(null)}
-                              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-md cursor-pointer"
+                              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-sm cursor-pointer"
                             >
                               <X className="w-3.5 h-3.5" />
-                              Abbrechen
+                              {isEn ? 'Cancel' : 'Abbrechen'}
                             </button>
                             <button
                               type="button"
                               onClick={() => handleSaveEditRule(rule.id)}
-                              className="inline-flex items-center gap-1 px-3 py-1 text-xs font-medium bg-blue-700 text-white rounded-md hover:bg-blue-800 cursor-pointer"
+                              className="inline-flex items-center gap-1 px-3 py-1 text-xs font-semibold bg-neutral-950 dark:bg-white text-white dark:text-neutral-950 rounded-sm hover:bg-neutral-800 dark:hover:bg-neutral-200 cursor-pointer"
                             >
                               <Check className="w-3.5 h-3.5" />
-                              Übernehmen
+                              {isEn ? 'Apply' : 'Übernehmen'}
                             </button>
                           </div>
                         </div>
                       ) : (
                         <div className="flex items-start justify-between gap-3">
                           <div className="space-y-1 min-w-0">
-                            <div className="text-sm font-medium text-slate-900 dark:text-slate-100">
+                            <div className="text-sm font-medium text-neutral-900 dark:text-neutral-100">
                               {rule.title}
                             </div>
-                            <p className="text-xs leading-relaxed text-slate-600 dark:text-slate-400">
+                            <p className="text-xs leading-relaxed text-neutral-600 dark:text-neutral-400">
                               {rule.instruction}
                             </p>
                           </div>
@@ -447,27 +465,27 @@ export function PreferencesView({
                               type="button"
                               onClick={() => handleToggleRule(rule.id)}
                               aria-pressed={rule.enabled}
-                              className={`px-2.5 py-1 text-xs font-medium rounded-lg border transition-colors whitespace-nowrap cursor-pointer ${
+                              className={`px-2.5 py-1 text-xs font-medium rounded-md border transition-colors whitespace-nowrap cursor-pointer ${
                                 rule.enabled
-                                  ? 'border-blue-600 bg-blue-700 dark:bg-blue-600 text-white'
-                                  : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
+                                  ? 'border-neutral-950 dark:border-white bg-neutral-950 dark:bg-white text-white dark:text-neutral-950 font-semibold'
+                                  : 'border-neutral-300 dark:border-neutral-700 text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800'
                               }`}
                             >
-                              {rule.enabled ? 'Aktiv' : 'Aus'}
+                              {rule.enabled ? (isEn ? 'On' : 'Aktiv') : isEn ? 'Off' : 'Aus'}
                             </button>
                             <button
                               type="button"
                               onClick={() => handleStartEditRule(rule)}
-                              aria-label="Regel bearbeiten"
-                              className="p-1.5 rounded-md text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                              aria-label={isEn ? 'Edit rule' : 'Regel bearbeiten'}
+                              className="p-1.5 rounded-sm text-neutral-400 hover:text-neutral-950 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
                             >
                               <Pencil className="w-3.5 h-3.5" />
                             </button>
                             <button
                               type="button"
                               onClick={() => handleDeleteRule(rule.id)}
-                              aria-label="Regel entfernen"
-                              className="p-1.5 rounded-md text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                              aria-label={isEn ? 'Remove rule' : 'Regel entfernen'}
+                              className="p-1.5 rounded-sm text-neutral-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>

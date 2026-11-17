@@ -49,8 +49,15 @@ const STORAGE_KEY_API_KEY = 'openrouter_api_key';
 const STORAGE_KEY_MODEL = 'openrouter_model';
 const STORAGE_KEY_SECONDARY_MODEL = 'openrouter_secondary_model';
 const STORAGE_KEY_DUAL = 'openrouter_dual_review';
+const STORAGE_KEY_ZDR = 'openrouter_enforce_zdr';
 const STORAGE_KEY_PREFS = 'uxz_writing_preferences';
 const STORAGE_KEY_HISTORY = 'uxz_rewrite_history';
+const STORAGE_KEY_DARK_MODE = 'uxz_dark_mode';
+const STORAGE_KEY_UI_LANG = 'uxz_ui_lang';
+
+function isEnglishUi(): boolean {
+  return getStoredString(STORAGE_KEY_UI_LANG) === 'en';
+}
 
 function getStoredString(key: string): string {
   if (typeof window === 'undefined') return '';
@@ -124,6 +131,7 @@ let memoryApiKey = getStoredString(STORAGE_KEY_API_KEY);
 let memoryModel = getStoredString(STORAGE_KEY_MODEL) || DEFAULT_MODEL;
 let memoryDualReviewEnabled = getStoredString(STORAGE_KEY_DUAL) === 'true';
 let memorySecondaryModel = getStoredString(STORAGE_KEY_SECONDARY_MODEL) || DEFAULT_MODEL;
+let memoryEnforceZdr = getStoredString(STORAGE_KEY_ZDR) === 'true';
 let memoryKeyInfo: OpenRouterStatus['keyInfo'] = null;
 let memoryPaidUnlocked = false;
 let memoryPaidPasswordHash = '';
@@ -192,6 +200,7 @@ function getStaticStatus(): OpenRouterStatus {
     model: memoryModel,
     dualReviewEnabled: memoryDualReviewEnabled,
     secondaryModel: memorySecondaryModel,
+    enforceZdr: memoryEnforceZdr,
     backendAvailable: false,
     paidModelsUnlocked: memoryPaidUnlocked,
     paidModelsPasswordConfigured: Boolean(BUILD_PAID_PASSWORD_HASH || memoryPaidPasswordHash),
@@ -203,7 +212,7 @@ function getReferer(): string {
   if (typeof window !== 'undefined') {
     return window.location.origin;
   }
-  return 'https://highl-write.pages.dev';
+  return 'https://uxz-write.pages.dev';
 }
 
 export async function fetchOpenRouterStatus(): Promise<OpenRouterStatus> {
@@ -259,16 +268,24 @@ export async function unlockPaidModels(
       });
       const data = (await res.json()) as OpenRouterStatus & { error?: string };
       if (!res.ok) {
-        return { ok: false, error: data.error || 'Entsperrung fehlgeschlagen.' };
+        return {
+          ok: false,
+          error: data.error || (isEnglishUi() ? 'Unlock failed.' : 'Entsperrung fehlgeschlagen.'),
+        };
       }
       return { ok: true, status: { ...data, backendAvailable: true } };
     } catch {
-      return { ok: false, error: 'Netzwerkfehler bei der Passwortprüfung.' };
+      return {
+        ok: false,
+        error: isEnglishUi()
+          ? 'Network error while verifying password.'
+          : 'Netzwerkfehler bei der Passwortprüfung.',
+      };
     }
   }
 
   if (!password) {
-    return { ok: false, error: 'Bitte gib ein Passwort ein.' };
+    return { ok: false, error: isEnglishUi() ? 'Please enter a password.' : 'Bitte gib ein Passwort ein.' };
   }
 
   const candidateHash = await sha256Hex(password);
@@ -276,14 +293,19 @@ export async function unlockPaidModels(
 
   if (activeHash) {
     if (!constantTimeEqual(candidateHash, activeHash)) {
-      return { ok: false, error: 'Falsches Passwort.' };
+      return { ok: false, error: isEnglishUi() ? 'Incorrect password.' : 'Falsches Passwort.' };
     }
     memoryPaidUnlocked = true;
     return { ok: true, status: getStaticStatus() };
   }
 
   if (password.length < 6) {
-    return { ok: false, error: 'Das Passwort muss mindestens 6 Zeichen lang sein.' };
+    return {
+      ok: false,
+      error: isEnglishUi()
+        ? 'Password must be at least 6 characters long.'
+        : 'Das Passwort muss mindestens 6 Zeichen lang sein.',
+    };
   }
 
   memoryPaidPasswordHash = candidateHash;
@@ -323,6 +345,7 @@ export async function saveOpenRouterConfig(params: {
   model?: string;
   dualReviewEnabled?: boolean;
   secondaryModel?: string;
+  enforceZdr?: boolean;
 }): Promise<{ ok: true; status: OpenRouterStatus } | { ok: false; error: string; code?: string }> {
   if (typeof params.apiKey === 'string' && params.apiKey.trim().length > 0) {
     setStoredString(STORAGE_KEY_API_KEY, params.apiKey.trim());
@@ -355,7 +378,9 @@ export async function saveOpenRouterConfig(params: {
     if (!free) {
       return {
         ok: false,
-        error: 'Kostenpflichtige Modelle sind gesperrt. Bitte gib zuerst das Passwort ein.',
+        error: isEnglishUi()
+          ? 'Paid models are locked. Please enter the password first.'
+          : 'Kostenpflichtige Modelle sind gesperrt. Bitte gib zuerst das Passwort ein.',
         code: 'PAID_MODEL_LOCKED',
       };
     }
@@ -370,7 +395,9 @@ export async function saveOpenRouterConfig(params: {
     if (!free) {
       return {
         ok: false,
-        error: 'Kostenpflichtige Modelle sind gesperrt. Bitte gib zuerst das Passwort ein.',
+        error: isEnglishUi()
+          ? 'Paid models are locked. Please enter the password first.'
+          : 'Kostenpflichtige Modelle sind gesperrt. Bitte gib zuerst das Passwort ein.',
         code: 'PAID_MODEL_LOCKED',
       };
     }
@@ -392,8 +419,12 @@ export async function saveOpenRouterConfig(params: {
           ok: false,
           error:
             verifyRes.status === 401 || verifyRes.status === 403
-              ? 'Der OpenRouter API-Schlüssel wurde abgelehnt. Bitte prüfe den Schlüssel.'
-              : `OpenRouter-Prüfung fehlgeschlagen (HTTP ${verifyRes.status}). ${errText}`.trim(),
+              ? isEnglishUi()
+                ? 'The OpenRouter API key was rejected. Please check your key.'
+                : 'Der OpenRouter API-Schlüssel wurde abgelehnt. Bitte prüfe den Schlüssel.'
+              : isEnglishUi()
+                ? `OpenRouter check failed (HTTP ${verifyRes.status}). ${errText}`.trim()
+                : `OpenRouter-Prüfung fehlgeschlagen (HTTP ${verifyRes.status}). ${errText}`.trim(),
         };
       }
       const verifyJson = (await verifyRes.json().catch(() => null)) as {
@@ -418,7 +449,9 @@ export async function saveOpenRouterConfig(params: {
     } catch (err) {
       return {
         ok: false,
-        error: `Verbindung zu OpenRouter fehlgeschlagen: ${err instanceof Error ? err.message : 'Unbekannter Fehler'}`,
+        error: isEnglishUi()
+          ? `Failed to connect to OpenRouter: ${err instanceof Error ? err.message : 'Unknown error'}`
+          : `Verbindung zu OpenRouter fehlgeschlagen: ${err instanceof Error ? err.message : 'Unbekannter Fehler'}`,
       };
     }
   }
@@ -434,6 +467,10 @@ export async function saveOpenRouterConfig(params: {
   if (typeof params.secondaryModel === 'string' && params.secondaryModel.trim().length > 0) {
     memorySecondaryModel = params.secondaryModel.trim();
     setStoredString(STORAGE_KEY_SECONDARY_MODEL, memorySecondaryModel);
+  }
+  if (typeof params.enforceZdr === 'boolean') {
+    memoryEnforceZdr = params.enforceZdr;
+    setStoredString(STORAGE_KEY_ZDR, String(memoryEnforceZdr));
   }
 
   return { ok: true, status: getStaticStatus() };
@@ -590,6 +627,9 @@ async function paceOpenRouterCall(signal?: AbortSignal, minSpacingOverrideMs?: n
 }
 
 function formatFriendlyRateLimitMessage(rawMessage: string): string {
+  if (isEnglishUi()) {
+    return `Rate limit (requests per minute) reached: ${rawMessage} — Tip: Use the "Free Models Router" (rotates automatically across free providers) or pause Instant mode.`;
+  }
   return `Anfrage-Limit (Requests pro Minute) erreicht: ${rawMessage} — Tipp: Nutze den „Free Models Router“ (wechselt automatisch zwischen freien Anbietern) oder pausiere den Sofort-Modus.`;
 }
 
@@ -724,14 +764,21 @@ export async function streamRewriteRequest(params: {
 
   // Static Cloudflare / GitHub Pages direct OpenRouter streaming
   if (!memoryApiKey) {
-    return { ok: false, error: 'Kein OpenRouter API-Schlüssel hinterlegt.' };
+    return {
+      ok: false,
+      error: isEnglishUi()
+        ? 'No OpenRouter API key configured.'
+        : 'Kein OpenRouter API-Schlüssel hinterlegt.',
+    };
   }
 
   const targetModel = params.model || memoryModel;
   if (!memoryPaidUnlocked && !(await isStaticModelFree(targetModel))) {
     return {
       ok: false,
-      error: 'Kostenpflichtige Modelle sind gesperrt. Bitte Passwort eingeben.',
+      error: isEnglishUi()
+        ? 'Paid models are locked. Please enter the password.'
+        : 'Kostenpflichtige Modelle sind gesperrt. Bitte Passwort eingeben.',
     };
   }
 
@@ -772,7 +819,9 @@ export async function streamRewriteRequest(params: {
     model: targetModel,
     stream: true,
     temperature: promptConfig.temperature,
-    provider: { sort: 'latency' },
+    provider: memoryEnforceZdr
+      ? { sort: 'latency', zdr: true, data_collection: 'deny' }
+      : { sort: 'latency' },
     messages: [
       { role: 'system', content: promptConfig.system },
       { role: 'user', content: userContent },
@@ -965,14 +1014,21 @@ export async function fetchSentenceAlternatives(params: {
   }
 
   if (!memoryApiKey) {
-    return { ok: false, error: 'Kein OpenRouter API-Schlüssel hinterlegt.' };
+    return {
+      ok: false,
+      error: isEnglishUi()
+        ? 'No OpenRouter API key configured.'
+        : 'Kein OpenRouter API-Schlüssel hinterlegt.',
+    };
   }
 
   const targetModel = params.model || memoryModel;
   if (!memoryPaidUnlocked && !(await isStaticModelFree(targetModel))) {
     return {
       ok: false,
-      error: 'Kostenpflichtige Modelle sind gesperrt. Bitte Passwort eingeben.',
+      error: isEnglishUi()
+        ? 'Paid models are locked. Please enter the password.'
+        : 'Kostenpflichtige Modelle sind gesperrt. Bitte Passwort eingeben.',
     };
   }
 
@@ -992,7 +1048,9 @@ export async function fetchSentenceAlternatives(params: {
   const payload = {
     model: params.model || memoryModel,
     temperature: 0.7,
-    provider: { sort: 'latency' },
+    provider: memoryEnforceZdr
+      ? { sort: 'latency', zdr: true, data_collection: 'deny' }
+      : { sort: 'latency' },
     messages: [
       {
         role: 'system',
@@ -1151,7 +1209,9 @@ export async function analyzeChangesRequest(params: {
   const payload = {
     model: params.model || memoryModel,
     temperature: 0,
-    provider: { sort: 'latency' },
+    provider: memoryEnforceZdr
+      ? { sort: 'latency', zdr: true, data_collection: 'deny' }
+      : { sort: 'latency' },
     messages: [
       {
         role: 'system',
@@ -1162,7 +1222,9 @@ export async function analyzeChangesRequest(params: {
           '- "zeichensetzung": Kommas, Punkte, Anführungszeichen, Bindestriche, Satzzeichen.',
           '- "stil": Stilistische Umformulierung, Wortwahl, Tonalität, Registerwechsel, eleganterer oder umgangssprachlicher Ausdruck.',
           '- "klarheit": Verdichtung, Streichung von Füllwörtern/Redundanz, verbesserte Verständlichkeit.',
-          'Gib zu jedem Eintrag außerdem eine knappe deutsche Begründung (max. 5 Wörter).',
+          isEnglishUi()
+            ? 'For each entry, provide a concise English reason (max. 5 words).'
+            : 'Gib zu jedem Eintrag außerdem eine knappe deutsche Begründung (max. 5 Wörter).',
           'Antworte ausschließlich als gültiges JSON-Objekt ohne Markdown-Codeblock:',
           '{"classifications":[{"id":"...","category":"rechtschreibung|grammatik|zeichensetzung|stil|klarheit","reason":"..."}]}',
         ].join('\n'),
@@ -1259,6 +1321,8 @@ export async function saveHistoryEntry(payload: {
   sourceText: string;
   refinedText: string;
   sourceLang: SourceLanguageId;
+  targetLang?: TargetLanguageId;
+  task?: RewriteTask;
   mode: RewriteMode;
   style: WritingStyleId;
   model: string;
@@ -1281,7 +1345,9 @@ export async function saveHistoryEntry(payload: {
     memoryHistory[0].sourceText === payload.sourceText &&
     memoryHistory[0].refinedText === payload.refinedText &&
     memoryHistory[0].style === payload.style &&
-    memoryHistory[0].mode === payload.mode
+    memoryHistory[0].mode === payload.mode &&
+    memoryHistory[0].task === payload.task &&
+    memoryHistory[0].targetLang === payload.targetLang
   ) {
     return memoryHistory;
   }
@@ -1354,4 +1420,69 @@ export async function saveWritingPreferences(prefs: WritingPreferences): Promise
     }
   }
   return memoryPreferences;
+}
+
+export async function clearAllLocalData(): Promise<{
+  status: OpenRouterStatus;
+  preferences: WritingPreferences;
+}> {
+  [
+    STORAGE_KEY_API_KEY,
+    STORAGE_KEY_MODEL,
+    STORAGE_KEY_SECONDARY_MODEL,
+    STORAGE_KEY_DUAL,
+    STORAGE_KEY_ZDR,
+    STORAGE_KEY_PREFS,
+    STORAGE_KEY_HISTORY,
+    STORAGE_KEY_DARK_MODE,
+    STORAGE_KEY_UI_LANG,
+  ].forEach(removeStoredString);
+
+  memoryApiKey = '';
+  memoryModel = DEFAULT_MODEL;
+  memoryDualReviewEnabled = false;
+  memorySecondaryModel = DEFAULT_MODEL;
+  memoryEnforceZdr = false;
+  memoryKeyInfo = null;
+  memoryPaidUnlocked = false;
+  memoryPaidPasswordHash = '';
+  memoryHistory = [];
+
+  const defaultPrefs: WritingPreferences = {
+    terms: [],
+    rules: DEFAULT_STARTER_RULES.map((r) => ({ ...r })),
+    settings: {
+      ...DEFAULT_WORKSPACE_SETTINGS,
+      enabledLanguages: [...DEFAULT_WORKSPACE_SETTINGS.enabledLanguages],
+    },
+  };
+  memoryPreferences = defaultPrefs;
+
+  const hasBackend = await detectBackend();
+  if (hasBackend) {
+    await Promise.allSettled([
+      fetch('./api/openrouter/config', { method: 'DELETE' }),
+      fetch('./api/openrouter/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: DEFAULT_MODEL,
+          dualReviewEnabled: false,
+          secondaryModel: DEFAULT_MODEL,
+          enforceZdr: false,
+        }),
+      }),
+      fetch('./api/openrouter/lock-paid', { method: 'POST' }),
+      fetch('./api/history', { method: 'DELETE' }),
+      fetch('./api/preferences', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(defaultPrefs),
+      }),
+    ]);
+    const latestStatus = await fetchOpenRouterStatus().catch(() => getStaticStatus());
+    return { status: latestStatus, preferences: defaultPrefs };
+  }
+
+  return { status: getStaticStatus(), preferences: defaultPrefs };
 }

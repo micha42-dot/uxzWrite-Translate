@@ -1,3 +1,5 @@
+export type UiLanguage = 'de' | 'en';
+
 export type RewriteMode = 'correction' | 'style';
 
 export type RewriteTask = 'rewrite' | 'translate';
@@ -30,7 +32,8 @@ export type SourceLanguageId =
   | 'uk'
   | 'ja'
   | 'zh'
-  | 'ko';
+  | 'ko'
+  | 'tlh';
 
 export type TargetLanguageId = Exclude<SourceLanguageId, 'auto'>;
 
@@ -52,6 +55,7 @@ export interface OpenRouterStatus {
   model: string;
   dualReviewEnabled: boolean;
   secondaryModel: string;
+  enforceZdr?: boolean;
   backendAvailable?: boolean;
   paidModelsUnlocked: boolean;
   paidModelsPasswordConfigured: boolean;
@@ -141,6 +145,7 @@ export const SOURCE_LANGUAGES: LanguageOption[] = [
   { id: 'ja', label: 'Japanisch', shortLabel: 'JA' },
   { id: 'zh', label: 'Chinesisch', shortLabel: 'ZH' },
   { id: 'ko', label: 'Koreanisch', shortLabel: 'KO' },
+  { id: 'tlh', label: 'Klingonisch', shortLabel: 'TLH' },
 ];
 
 export const TRANSLATABLE_LANGUAGES = SOURCE_LANGUAGES.filter(
@@ -196,7 +201,7 @@ export interface WorkspaceSettings {
 export const DEFAULT_WORKSPACE_SETTINGS: WorkspaceSettings = {
   defaultSourceLang: 'auto',
   defaultTargetLang: 'en-US',
-  enabledLanguages: ['de', 'en-US', 'en-GB', 'fr', 'es', 'it', 'nl', 'pt', 'pl'],
+  enabledLanguages: ['de', 'en-US', 'en-GB', 'fr', 'es', 'it', 'nl', 'pt', 'pl', 'tlh'],
   defaultWriteMode: 'style',
   defaultWriteStyle: 'ausgewogen',
   defaultTranslationTone: 'neutral',

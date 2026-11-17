@@ -20,6 +20,7 @@ export const LANGUAGE_INSTRUCTIONS: Record<string, string> = {
   ja: 'テキストは日本語です。日本語のまま自然な表記と文法を維持してください。',
   zh: '文本为中文。请严格保持中文并遵循自然的现代汉语表达与标点规范。',
   ko: '텍스트는 한국어입니다. 한국어를 유지하며 정확한 맞춤법과 자연스러운 문법을 따르세요.',
+  tlh: 'Der Text ist auf Klingonisch (tlhIngan Hol). Verbleibe strikt im Klingonischen und beachte die kanonische Okrand-Umschrift inklusive exakter Groß-/Kleinschreibung (z. B. q vs. Q, D, S, H, I, tlh, ng, ch, gh, ’/\') sowie die OVS-Satzstellung und Verbpräfixe/-suffixe.',
 };
 
 export const TARGET_LANGUAGE_NAMES: Record<string, string> = {
@@ -38,6 +39,7 @@ export const TARGET_LANGUAGE_NAMES: Record<string, string> = {
   ja: 'Japanisch (natürliches, idiomatisches Japanisch)',
   zh: 'Chinesisch (natürliches, idiomatisches modernes Chinesisch)',
   ko: 'Koreanisch (natürliches, idiomatisches Koreanisch)',
+  tlh: 'Klingonisch (tlhIngan Hol – kanonische Okrand-Umschrift mit exakter Groß-/Kleinschreibung wie q/Q, D, S, H, I, ng, tlh, ch, gh, \' sowie korrekter Grammatik)',
 };
 
 export const TRANSLATION_TONE_INSTRUCTIONS: Record<string, string> = {

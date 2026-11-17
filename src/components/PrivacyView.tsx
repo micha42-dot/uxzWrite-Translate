@@ -1,307 +1,504 @@
-import { ArrowLeft, Database, ExternalLink, Globe, HardDrive, KeyRound, Server, ShieldCheck } from 'lucide-react';
+import { useState } from 'react';
+import {
+  ArrowLeft,
+  Check,
+  Database,
+  ExternalLink,
+  Globe,
+  HardDrive,
+  KeyRound,
+  Lock,
+  Server,
+  ShieldCheck,
+  Trash2,
+} from 'lucide-react';
+import { useUiLang } from '../lib/i18n';
 
 interface PrivacyViewProps {
   onBackToEditor: () => void;
   onOpenSettings: () => void;
+  onClearAllData: () => Promise<void>;
 }
 
-export function PrivacyView({ onBackToEditor, onOpenSettings }: PrivacyViewProps) {
+export function PrivacyView({
+  onBackToEditor,
+  onOpenSettings,
+  onClearAllData,
+}: PrivacyViewProps) {
+  const { uiLang } = useUiLang();
+  const isEn = uiLang === 'en';
+
+  const [confirmClear, setConfirmClear] = useState(false);
+  const [clearing, setClearing] = useState(false);
+  const [cleared, setCleared] = useState(false);
+
+  async function handleConfirmClear() {
+    setClearing(true);
+    try {
+      await onClearAllData();
+      setConfirmClear(false);
+      setCleared(true);
+      setTimeout(() => setCleared(false), 2600);
+    } finally {
+      setClearing(false);
+    }
+  }
+
   return (
-    <div className="max-w-[1040px] mx-auto px-4 sm:px-6 py-7 space-y-6">
+    <div className="max-w-[980px] mx-auto px-4 sm:px-6 py-8 space-y-6">
       {/* Header */}
-      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-neutral-200 dark:border-neutral-800 pb-5">
+      <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="space-y-1.5">
-          <button
-            type="button"
-            onClick={onBackToEditor}
-            className="inline-flex items-center gap-1.5 text-xs font-mono text-neutral-500 hover:text-neutral-950 dark:text-neutral-400 dark:hover:text-white transition-colors cursor-pointer mb-1"
-          >
-            <ArrowLeft className="w-3.5 h-3.5" />
-            Zurück zum Editor
-          </button>
-          <h1 className="font-display text-2xl sm:text-[26px] font-semibold tracking-tight text-neutral-950 dark:text-white">
-            Datenschutz &amp; Datenflüsse
+          <div className="flex items-center gap-2 text-xs font-mono uppercase tracking-wider text-neutral-500 dark:text-neutral-400">
+            <ShieldCheck className="w-3.5 h-3.5" />
+            <span>{isEn ? 'Transparency & Privacy' : 'Transparenz & Datenschutz'}</span>
+          </div>
+          <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-neutral-950 dark:text-white">
+            {isEn ? 'Privacy & Data Flows' : 'Datenschutz & Datenflüsse'}
           </h1>
-          <p className="text-sm text-neutral-600 dark:text-neutral-400 max-w-2xl leading-relaxed">
-            Transparente Übersicht darüber, welche Daten lokal in deinem Browser bleiben und welche Daten durch Hosting (GitHub Pages) sowie KI-Routing (OpenRouter &amp; Modellanbieter) technisch erfasst werden.
+          <p className="text-sm text-neutral-600 dark:text-neutral-400 max-w-2xl">
+            {isEn
+              ? 'Overview of what happens with your texts, API keys, and browser storage — who receives which technical data and which safeguards you can toggle yourself.'
+              : 'Überblick darüber, was mit deinen Texten, API-Schlüsseln und Browser-Daten passiert – welche Dienste welche technischen Daten erhalten und welche Schutzmaßnahmen du selbst aktivieren kannst.'}
           </p>
         </div>
 
-        <a
-          href="https://michaelfoertsch.de/impressum.html"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-md border border-neutral-300 dark:border-neutral-800 bg-white dark:bg-[#0A0D14] text-neutral-800 dark:text-neutral-200 hover:border-neutral-950 dark:hover:border-white transition-colors whitespace-nowrap shrink-0"
+        <button
+          type="button"
+          onClick={onBackToEditor}
+          className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-md border border-neutral-300 dark:border-neutral-800 bg-white dark:bg-[#0A0D14] text-neutral-800 dark:text-neutral-200 hover:border-neutral-950 dark:hover:border-white transition-colors cursor-pointer"
         >
-          <span>Impressum öffnen</span>
-          <ExternalLink className="w-3.5 h-3.5" />
-        </a>
+          <ArrowLeft className="w-3.5 h-3.5" />
+          {isEn ? 'Back to Editor' : 'Zurück zum Editor'}
+        </button>
       </div>
 
-      {/* 1. Betreiber & Lokale Speicherung */}
-      <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <article className="p-5 rounded-lg border border-neutral-300/90 dark:border-neutral-800 bg-white dark:bg-[#0C1019] space-y-3">
-          <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-md bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-neutral-900 dark:text-neutral-100">
-              <ShieldCheck className="w-4 h-4" />
-            </div>
-            <div>
-              <h2 className="text-sm font-semibold text-neutral-950 dark:text-white">
-                1. Website-Betreiber
-              </h2>
-              <p className="text-[11px] font-mono text-neutral-500 dark:text-neutral-400">
-                Kein Tracking · Keine eigene Datenbank
-              </p>
-            </div>
+      {/* 1. Website Operator */}
+      <section className="rounded-lg border border-neutral-300/90 dark:border-neutral-800 bg-white dark:bg-[#0C1019] p-5 sm:p-6 space-y-3 shadow-2xs">
+        <div className="flex items-center gap-2.5">
+          <ShieldCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+          <h2 className="text-sm font-semibold text-neutral-950 dark:text-white">
+            {isEn
+              ? '1. Website Operator — No Self-Hosted Tracking'
+              : '1. Betreiber dieser Website – Keine eigene Datenerhebung'}
+          </h2>
+        </div>
+        {isEn ? (
+          <div className="text-sm leading-relaxed text-neutral-700 dark:text-neutral-300 space-y-2.5">
+            <p>
+              As the operator of <strong>üxz</strong>, I do not collect, store, or analyze any personal data,
+              entered texts, API keys, or usage statistics on my own servers. There are no analytics tools,
+              tracking pixels, ad networks, or user accounts.
+            </p>
+            <p className="text-xs text-neutral-600 dark:text-neutral-400">
+              In full-stack Node server mode (when self-hosted via Express), user-entered OpenRouter API keys are
+              only kept encrypted inside an <span className="font-mono">HttpOnly</span> cookie (AES-256-GCM) and
+              are never logged or stored in a database.
+            </p>
           </div>
-
-          <ul className="space-y-2 text-xs leading-relaxed text-neutral-700 dark:text-neutral-300 list-disc pl-4">
-            <li>
-              Der Betreiber dieser Seite erhebt, analysiert und speichert selbst <strong>keinerlei personenbezogene Daten, Nutzungsstatistiken oder Texte</strong>.
-            </li>
-            <li>
-              Es kommen <strong>keine Tracking-Tools</strong> (wie Google Analytics oder Matomo), keine Werbe-Pixel und keine Marketing-Cookies zum Einsatz.
-            </li>
-            <li>
-              Im statischen Betrieb („Bring Your Own Key“) existiert kein eigener Anwendungsserver zwischen deinem Browser und OpenRouter: Anfragen gehen direkt von deinem Endgerät an die OpenRouter-API.
-            </li>
-          </ul>
-        </article>
-
-        <article className="p-5 rounded-lg border border-neutral-300/90 dark:border-neutral-800 bg-white dark:bg-[#0C1019] space-y-3">
-          <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-md bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-neutral-900 dark:text-neutral-100">
-              <HardDrive className="w-4 h-4" />
-            </div>
-            <div>
-              <h2 className="text-sm font-semibold text-neutral-950 dark:text-white">
-                2. Lokale Speicherung im Browser
-              </h2>
-              <p className="text-[11px] font-mono text-neutral-500 dark:text-neutral-400">
-                localStorage &amp; sessionStorage
-              </p>
-            </div>
+        ) : (
+          <div className="text-sm leading-relaxed text-neutral-700 dark:text-neutral-300 space-y-2.5">
+            <p>
+              Als Betreiber von <strong>üxz</strong> erhebe, speichere oder werte ich selbst keine personenbezogenen
+              Daten, keine eingegebenen Texte, keine API-Schlüssel und keine Nutzungsstatistiken aus. Es gibt weder
+              Analytics-Skripte noch Werbenetzwerke, Tracking-Pixel oder Benutzerkonten.
+            </p>
+            <p className="text-xs text-neutral-600 dark:text-neutral-400">
+              Wird die Anwendung im Node-Server-Modus selbst betrieben, verbleiben manuell hinterlegte
+              OpenRouter-API-Keys lediglich AES-256-GCM-verschlüsselt in einem{' '}
+              <span className="font-mono">HttpOnly</span>-Cookie und werden nicht protokolliert oder in einer
+              Datenbank abgelegt.
+            </p>
           </div>
-
-          <p className="text-xs leading-relaxed text-neutral-700 dark:text-neutral-300">
-            Damit API-Key und Einstellungen nach dem Neuladen erhalten bleiben, speichert diese Web-App folgende Einträge ausschließlich lokal auf deinem Gerät:
-          </p>
-
-          <ul className="space-y-1.5 text-xs leading-relaxed text-neutral-700 dark:text-neutral-300 font-mono bg-neutral-50 dark:bg-[#080B10] p-3 rounded-md border border-neutral-200 dark:border-neutral-800">
-            <li>• openrouter_api_key <span className="font-sans text-neutral-500 dark:text-neutral-400">(dein API-Schlüssel)</span></li>
-            <li>• openrouter_model / _secondary_model / _dual_review</li>
-            <li>• uxz_writing_preferences <span className="font-sans text-neutral-500 dark:text-neutral-400">(Wörterbuch &amp; Regeln)</span></li>
-            <li>• uxz_rewrite_history <span className="font-sans text-neutral-500 dark:text-neutral-400">(nur manuell über „Sichern“)</span></li>
-          </ul>
-
-          <p className="text-[11.5px] text-neutral-500 dark:text-neutral-400 leading-relaxed">
-            Aktuell im Editor eingetippte Entwürfe werden nicht dauerhaft lokal abgelegt. Du kannst deinen Key jederzeit im{' '}
-            <button
-              type="button"
-              onClick={onOpenSettings}
-              className="underline underline-offset-2 text-neutral-800 dark:text-neutral-200 hover:text-neutral-950 dark:hover:text-white cursor-pointer"
-            >
-              API-Dialog
-            </button>{' '}
-            oder über die Browser-Daten löschen.
-          </p>
-        </article>
+        )}
       </section>
 
-      {/* 3. GitHub Pages Hosting */}
-      <section className="p-5 rounded-lg border border-neutral-300/90 dark:border-neutral-800 bg-white dark:bg-[#0C1019] space-y-3.5">
-        <div className="flex flex-wrap items-center justify-between gap-2">
+      {/* 2. Local Browser Storage */}
+      <section className="rounded-lg border border-neutral-300/90 dark:border-neutral-800 bg-white dark:bg-[#0C1019] p-5 sm:p-6 space-y-4 shadow-2xs">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-md bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-neutral-900 dark:text-neutral-100">
-              <Server className="w-4 h-4" />
-            </div>
-            <div>
-              <h2 className="text-sm font-semibold text-neutral-950 dark:text-white">
-                3. Hosting über GitHub Pages (GitHub, Inc.)
-              </h2>
-              <p className="text-[11px] font-mono text-neutral-500 dark:text-neutral-400">
-                Auslieferung der statischen Website (HTML / JS / CSS)
-              </p>
-            </div>
+            <HardDrive className="w-4 h-4 text-neutral-700 dark:text-neutral-300 shrink-0" />
+            <h2 className="text-sm font-semibold text-neutral-950 dark:text-white">
+              {isEn
+                ? '2. Local Storage in Your Browser'
+                : '2. Lokale Speicherung in deinem Browser'}
+            </h2>
           </div>
-          <a
-            href="https://docs.github.com/en/pages/getting-started-with-github-pages/what-is-github-pages#data-collection"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 text-[11.5px] font-mono text-neutral-600 dark:text-neutral-400 hover:text-neutral-950 dark:hover:text-white underline underline-offset-4"
-          >
-            GitHub Pages Docs <ExternalLink className="w-3 h-3" />
-          </a>
+
+          <div className="flex items-center gap-2">
+            {cleared && (
+              <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700 dark:text-emerald-400">
+                <Check className="w-3.5 h-3.5" />
+                {isEn ? 'Local data cleared' : 'Lokale Daten gelöscht'}
+              </span>
+            )}
+            {!confirmClear ? (
+              <button
+                type="button"
+                onClick={() => setConfirmClear(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-rose-300 dark:border-rose-900/70 text-rose-700 dark:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                {isEn ? 'Clear all local browser data' : 'Alle lokalen Browser-Daten löschen'}
+              </button>
+            ) : (
+              <div className="inline-flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={clearing}
+                  onClick={handleConfirmClear}
+                  className="px-3 py-1.5 text-xs font-semibold rounded-md bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50 cursor-pointer"
+                >
+                  {clearing
+                    ? isEn
+                      ? 'Clearing…'
+                      : 'Löscht…'
+                    : isEn
+                      ? 'Confirm deletion'
+                      : 'Löschen bestätigen'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirmClear(false)}
+                  className="px-2.5 py-1.5 text-xs font-medium rounded-md border border-neutral-300 dark:border-neutral-700 text-neutral-600 dark:text-neutral-300 cursor-pointer"
+                >
+                  {isEn ? 'Cancel' : 'Abbrechen'}
+                </button>
+              </div>
+            )}
+          </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs leading-relaxed text-neutral-700 dark:text-neutral-300">
-          <div className="space-y-1.5">
-            <h3 className="font-semibold text-neutral-900 dark:text-neutral-100">
-              Was GitHub Pages tatsächlich erfasst
-            </h3>
-            <ul className="space-y-1.5 list-disc pl-4">
-              <li>
-                <strong>Besucher-IP-Adresse:</strong> Laut offizieller GitHub-Pages-Dokumentation wird die IP-Adresse jedes Besuchers beim Seitenaufruf protokolliert und aus Sicherheitsgründen gespeichert – unabhängig davon, ob ein GitHub-Konto genutzt wird.
-              </li>
-              <li>
-                <strong>Technische Zugriffs-/Verbindungsdaten:</strong> Im Rahmen des allgemeinen <em>GitHub Privacy Statement</em> fallen zusätzlich Zeitstempel, angeforderte Pfade/Dateien, HTTP-Referrer sowie Browser- und Geräteinformationen (User-Agent) an.
-              </li>
-            </ul>
-          </div>
-          <div className="space-y-1.5">
-            <h3 className="font-semibold text-neutral-900 dark:text-neutral-100">
-              Zweck &amp; Zugriff
-            </h3>
-            <ul className="space-y-1.5 list-disc pl-4">
-              <li>
-                Aufrechterhaltung der Infrastruktur-Sicherheit, Abwehr von DDoS-Angriffen und Missbrauch sowie Einhaltung gesetzlicher Pflichten durch GitHub, Inc. (USA / Microsoft).
-              </li>
-              <li>
-                Der Betreiber dieser Website hat selbst <strong>keinen Zugriff</strong> auf diese Server-Logdaten von GitHub Pages.
-              </li>
-            </ul>
-          </div>
+        <p className="text-sm leading-relaxed text-neutral-700 dark:text-neutral-300">
+          {isEn
+            ? 'In static web mode (e.g. GitHub Pages or Cloudflare Pages), your configuration and saved entries are stored exclusively in your own browser storage (localStorage / sessionStorage) and never leave your device unless you trigger an API request:'
+            : 'Im statischen Web-Betrieb (z. B. über GitHub Pages oder Cloudflare Pages) werden deine Konfiguration und manuell gesicherten Einträge ausschließlich lokal im Speicher deines Browsers (localStorage / sessionStorage) abgelegt:'}
+        </p>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
+          {[
+            {
+              key: 'uxz_openrouter_key',
+              desc: isEn
+                ? 'Your personal OpenRouter API key (optional, stored only if entered).'
+                : 'Dein persönlicher OpenRouter-API-Key (optional, nur bei Eingabe).',
+            },
+            {
+              key: 'uxz_model / uxz_secondary_model / uxz_dual_review / uxz_enforce_zdr',
+              desc: isEn
+                ? 'Selected primary & review models, Two-Person Review toggle, and Zero Data Retention setting.'
+                : 'Gewählte Primär- und Prüfmodelle, Zwei-Augen-Prinzip sowie ZDR-Schalter.',
+            },
+            {
+              key: 'uxz_writing_preferences',
+              desc: isEn
+                ? 'Your protected glossary terms, custom writing rules, and workspace / RPM options.'
+                : 'Deine geschützten Begriffe, Schreibregeln sowie Optionen & Rate-Limit-Werte.',
+            },
+            {
+              key: 'uxz_history',
+              desc: isEn
+                ? 'Manually saved editor & translation entries (up to 60 entries, only when you click Save).'
+                : 'Manuell über „Sichern“ gespeicherte Verlaufeinträge (max. 60 Einträge).',
+            },
+            {
+              key: 'uxz_dark_mode / uxz_ui_lang',
+              desc: isEn
+                ? 'Light/Dark theme preference and selected interface language (de / en).'
+                : 'Gewähltes Design (Hell/Dunkel) und Oberflächensprache (Deutsch/Englisch).',
+            },
+            {
+              key: 'uxz_paid_unlocked',
+              desc: isEn
+                ? 'Temporary session unlock state if paid-model password protection is configured.'
+                : 'Temporärer Entsperrstatus für kostenpflichtige Modelle (bei aktiviertem Passwortschutz).',
+            },
+          ].map((item) => (
+            <div
+              key={item.key}
+              className="p-3 rounded-md border border-neutral-200 dark:border-neutral-800 bg-neutral-50/70 dark:bg-[#080B10] space-y-1"
+            >
+              <div className="font-mono text-[11px] font-semibold text-neutral-900 dark:text-neutral-100 break-all">
+                {item.key}
+              </div>
+              <p className="text-neutral-600 dark:text-neutral-400 leading-relaxed">{item.desc}</p>
+            </div>
+          ))}
         </div>
+
+        <p className="text-xs text-neutral-500 dark:text-neutral-400">
+          {isEn
+            ? 'Active draft text typed into the Editor or Translate workspace is kept strictly in memory (RAM) and is never written automatically to localStorage.'
+            : 'Laufende Entwürfe im Editor oder Übersetzer werden grundsätzlich nicht automatisch im localStorage gespeichert, sondern nur im Arbeitsspeicher gehalten.'}
+        </p>
+      </section>
+
+      {/* 3. Hosting Provider */}
+      <section className="rounded-lg border border-neutral-300/90 dark:border-neutral-800 bg-white dark:bg-[#0C1019] p-5 sm:p-6 space-y-3 shadow-2xs">
+        <div className="flex items-center gap-2.5">
+          <Server className="w-4 h-4 text-neutral-700 dark:text-neutral-300 shrink-0" />
+          <h2 className="text-sm font-semibold text-neutral-950 dark:text-white">
+            {isEn
+              ? '3. Hosting & Static Delivery (GitHub Pages / Cloudflare Pages)'
+              : '3. Hosting & Auslieferung (GitHub Pages / Cloudflare Pages)'}
+          </h2>
+        </div>
+        {isEn ? (
+          <div className="text-sm leading-relaxed text-neutral-700 dark:text-neutral-300 space-y-2">
+            <p>
+              When you open a statically hosted instance (for example via <strong>GitHub Pages</strong> or{' '}
+              <strong>Cloudflare Pages</strong>), your browser fetches HTML, CSS, JavaScript, and icon assets directly
+              from that hosting provider&apos;s CDN servers.
+            </p>
+            <ul className="list-disc pl-5 space-y-1 text-xs text-neutral-600 dark:text-neutral-400">
+              <li>
+                <strong>Technical Server Logs:</strong> Hosting providers automatically record standard HTTP connection
+                metadata such as your IP address, date and time of request, requested file path, HTTP status code,
+                referrer URL, and browser user agent for DDoS protection, abuse prevention, and operational stability.
+              </li>
+              <li>
+                <strong>No Access by App Operator:</strong> The operator of this site cannot see raw visitor IP logs from
+                GitHub Pages. Further details can be found in the{' '}
+                <a
+                  href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline underline-offset-4 text-neutral-900 dark:text-neutral-100"
+                >
+                  GitHub Privacy Statement
+                </a>
+                .
+              </li>
+            </ul>
+          </div>
+        ) : (
+          <div className="text-sm leading-relaxed text-neutral-700 dark:text-neutral-300 space-y-2">
+            <p>
+              Beim Aufruf einer statisch bereitgestellten Instanz (z. B. über <strong>GitHub Pages</strong> oder{' '}
+              <strong>Cloudflare Pages</strong>) lädt dein Browser die statischen Dateien (HTML, CSS, JavaScript,
+              Grafiken) direkt von den CDN-Servern des jeweiligen Hosting-Anbieters.
+            </p>
+            <ul className="list-disc pl-5 space-y-1 text-xs text-neutral-600 dark:text-neutral-400">
+              <li>
+                <strong>Technische Zugriffslogs:</strong> Der Hosting-Dienst erfasst technisch bedingt Verbindungsdaten
+                wie deine IP-Adresse, Zeitstempel, abgerufene URL, HTTP-Statuscode, Referrer und Browser-User-Agent zur
+                Missbrauchs- und DDoS-Abwehr sowie zur Auslieferung der Seite.
+              </li>
+              <li>
+                <strong>Kein Zugriff durch den Betreiber:</strong> Auf detaillierte Besucher-IP-Logs von GitHub Pages hat
+                der Betreiber dieser App keinen Zugriff. Weitere Informationen findest du in der{' '}
+                <a
+                  href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline underline-offset-4 text-neutral-900 dark:text-neutral-100"
+                >
+                  GitHub Privacy Statement
+                </a>
+                .
+              </li>
+            </ul>
+          </div>
+        )}
       </section>
 
       {/* 4. OpenRouter */}
-      <section className="p-5 rounded-lg border border-neutral-300/90 dark:border-neutral-800 bg-white dark:bg-[#0C1019] space-y-3.5">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-md bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-neutral-900 dark:text-neutral-100">
-              <KeyRound className="w-4 h-4" />
-            </div>
-            <div>
-              <h2 className="text-sm font-semibold text-neutral-950 dark:text-white">
-                4. OpenRouter (OpenRouter, Inc.) als API-Router
-              </h2>
-              <p className="text-[11px] font-mono text-neutral-500 dark:text-neutral-400">
-                Verarbeitung über deinen eigenen API-Schlüssel
-              </p>
-            </div>
-          </div>
-          <a
-            href="https://openrouter.ai/docs/features/privacy-and-logging"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 text-[11.5px] font-mono text-neutral-600 dark:text-neutral-400 hover:text-neutral-950 dark:hover:text-white underline underline-offset-4"
-          >
-            OpenRouter Privacy Docs <ExternalLink className="w-3 h-3" />
-          </a>
+      <section className="rounded-lg border border-neutral-300/90 dark:border-neutral-800 bg-white dark:bg-[#0C1019] p-5 sm:p-6 space-y-3 shadow-2xs">
+        <div className="flex items-center gap-2.5">
+          <Globe className="w-4 h-4 text-neutral-700 dark:text-neutral-300 shrink-0" />
+          <h2 className="text-sm font-semibold text-neutral-950 dark:text-white">
+            {isEn
+              ? '4. API Gateway: OpenRouter (openrouter.ai)'
+              : '4. API-Router: OpenRouter (openrouter.ai)'}
+          </h2>
         </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs leading-relaxed text-neutral-700 dark:text-neutral-300">
-          <div className="space-y-1.5">
-            <h3 className="font-semibold text-neutral-900 dark:text-neutral-100">
-              Was OpenRouter standardmäßig sammelt (Metadaten)
-            </h3>
-            <ul className="space-y-1.5 list-disc pl-4">
+        {isEn ? (
+          <div className="text-sm leading-relaxed text-neutral-700 dark:text-neutral-300 space-y-2">
+            <p>
+              Whenever you refine, verify, analyze, or translate text (or load available models), your browser — or the
+              Node backend — connects to <span className="font-mono text-xs">https://openrouter.ai/api/v1</span> using
+              your configured OpenRouter API key.
+            </p>
+            <ul className="list-disc pl-5 space-y-1 text-xs text-neutral-600 dark:text-neutral-400">
               <li>
-                <strong>Anfrage-Metadaten (immer):</strong> Auch wenn Prompt-Logging deaktiviert ist, protokolliert OpenRouter zu jeder API-Anfrage automatisch Token-Anzahlen (Input/Output), Antwortzeit (Latenz), gewähltes Modell, gewählten Provider, Kosten, Zeitstempel sowie die Zuordnung zu deinem API-Key.
+                <strong>Transmitted Content:</strong> Your submitted text, selected language/style/tone, active glossary
+                terms and custom rules, plus your API key (in the{' '}
+                <span className="font-mono">Authorization</span> header).
               </li>
               <li>
-                <strong>HTTP-Metadaten dieser App:</strong> Dein Browser übermittelt technisch bedingt deine IP-Adresse sowie die Header <span className="font-mono">HTTP-Referer</span> (Website-URL) und <span className="font-mono">X-Title</span> (<span className="font-mono">ÜxzWrite &amp; Translate</span>).
-              </li>
-            </ul>
-          </div>
-          <div className="space-y-1.5">
-            <h3 className="font-semibold text-neutral-900 dark:text-neutral-100">
-              Was OpenRouter mit Textinhalten (Prompts &amp; Antworten) tut
-            </h3>
-            <ul className="space-y-1.5 list-disc pl-4">
-              <li>
-                <strong>Standardmäßig kein Prompt-Logging:</strong> Laut OpenRouter speichert der Dienst selbst standardmäßig <em>keine</em> Textinhalte von Eingaben oder Ausgaben – außer du aktivierst in deinem OpenRouter-Konto optional <em>Input/Output Logging</em> (dann mindestens 3 Monate Speicherung) oder <em>Product Improvement Opt-In</em>.
+                <strong>Metadata &amp; Billing Logs:</strong> OpenRouter logs request metadata (timestamps, selected model,
+                token counts, costs, latency) to handle billing and rate limits for your account.
               </li>
               <li>
-                <strong>Sicherheits- &amp; Stichproben-Ausnahmen:</strong> OpenRouter scannt Anfragen automatisiert im Transit auf schwerwiegende Verstöße (u. a. CSAM-Erkennung; Verdachtsfälle können gespeichert und gemeldet werden) und kategorisiert kleine anonyme Stichproben ohne Konto-Zuordnung über ein Zero-Data-Retention-Modell.
+                <strong>Prompt Logging &amp; Privacy Settings:</strong> By default, OpenRouter states that it does not
+                store prompt/completion bodies unless you explicitly enable prompt logging in your OpenRouter account
+                settings. See the{' '}
+                <a
+                  href="https://openrouter.ai/privacy"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline underline-offset-4 text-neutral-900 dark:text-neutral-100"
+                >
+                  OpenRouter Privacy Policy
+                </a>
+                .
               </li>
             </ul>
           </div>
-        </div>
+        ) : (
+          <div className="text-sm leading-relaxed text-neutral-700 dark:text-neutral-300 space-y-2">
+            <p>
+              Sobald du Text verfeinerst, nachprüfst, übersetzt oder die Modellliste abrufst, verbindet sich dein Browser
+              (bzw. im Server-Modus das Backend) mit <span className="font-mono text-xs">https://openrouter.ai/api/v1</span>.
+            </p>
+            <ul className="list-disc pl-5 space-y-1 text-xs text-neutral-600 dark:text-neutral-400">
+              <li>
+                <strong>Übertragene Inhalte:</strong> Dein eingegebener Text, die gewählte Sprache/Stil/Ton-Einstellung,
+                deine aktiven Wörterbuch-Begriffe und Schreibregeln sowie dein API-Schlüssel im{' '}
+                <span className="font-mono">Authorization</span>-Header.
+              </li>
+              <li>
+                <strong>Metadaten &amp; Abrechnung:</strong> OpenRouter protokolliert technische Metadaten wie
+                Zeitstempel, Modell-ID, Token-Verbrauch, Kosten und Latenz zur Abrechnung und Rate-Limit-Steuerung in
+                deinem Konto.
+              </li>
+              <li>
+                <strong>Prompt-Speicherung:</strong> Laut OpenRouter werden Prompt- und Antwortinhalte standardmäßig nicht
+                dauerhaft gespeichert, sofern Prompt-Logging im OpenRouter-Konto nicht aktiv eingeschaltet wurde. Details
+                regelt die{' '}
+                <a
+                  href="https://openrouter.ai/privacy"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline underline-offset-4 text-neutral-900 dark:text-neutral-100"
+                >
+                  OpenRouter Privacy Policy
+                </a>
+                .
+              </li>
+            </ul>
+          </div>
+        )}
       </section>
 
-      {/* 5. Upstream-Modellanbieter & Free-Modelle */}
-      <section className="p-5 rounded-lg border border-neutral-300/90 dark:border-neutral-800 bg-white dark:bg-[#0C1019] space-y-3.5">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-md bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-neutral-900 dark:text-neutral-100">
-              <Globe className="w-4 h-4" />
-            </div>
-            <div>
-              <h2 className="text-sm font-semibold text-neutral-950 dark:text-white">
-                5. Nachgelagerte KI-Modellanbieter &amp; kostenlose Modelle (<span className="font-mono">:free</span>)
-              </h2>
-              <p className="text-[11px] font-mono text-neutral-500 dark:text-neutral-400">
-                Upstream-Inferenz (OpenAI, Google, Anthropic, DeepSeek, Meta-Hoster u. a.)
-              </p>
-            </div>
-          </div>
-          <a
-            href="https://openrouter.ai/settings/privacy"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 text-[11.5px] font-mono text-neutral-600 dark:text-neutral-400 hover:text-neutral-950 dark:hover:text-white underline underline-offset-4"
-          >
-            OpenRouter Privacy-Settings <ExternalLink className="w-3 h-3" />
-          </a>
+      {/* 5. Downstream AI Providers & :free models */}
+      <section className="rounded-lg border border-neutral-300/90 dark:border-neutral-800 bg-white dark:bg-[#0C1019] p-5 sm:p-6 space-y-3 shadow-2xs">
+        <div className="flex items-center gap-2.5">
+          <Database className="w-4 h-4 text-neutral-700 dark:text-neutral-300 shrink-0" />
+          <h2 className="text-sm font-semibold text-neutral-950 dark:text-white">
+            {isEn
+              ? '5. Downstream AI Model Providers & Free (:free) Models'
+              : '5. Nachgelagerte KI-Modellanbieter & Gratis-Modelle (:free)'}
+          </h2>
         </div>
-
-        <div className="space-y-3 text-xs leading-relaxed text-neutral-700 dark:text-neutral-300">
-          <p>
-            OpenRouter leitet deine Texte inklusive aktiver Wörterbuch- und Stilregeln zur Verarbeitung an den jeweiligen Inferenz-Anbieter des gewählten Modells weiter. Wie dieser Anbieter mit deinen Texten umgeht, hängt vom jeweiligen Endpunkt und deinen Kontoeinstellungen ab:
-          </p>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <div className="p-3.5 rounded-md bg-neutral-50 dark:bg-[#080B10] border border-neutral-200 dark:border-neutral-800 space-y-1">
-              <div className="font-semibold text-neutral-950 dark:text-white">Kostenlose Modelle (:free)</div>
-              <p className="text-neutral-600 dark:text-neutral-400">
-                Viele kostenlose Endpoints (z. B. über <span className="font-mono">openrouter/free</span> oder <span className="font-mono">*:free</span>) erlauben dem Modellanbieter ausdrücklich, Prompts und Antworten zu protokollieren und zum <strong>Training</strong> zu verwenden.
-              </p>
-            </div>
-            <div className="p-3.5 rounded-md bg-neutral-50 dark:bg-[#080B10] border border-neutral-200 dark:border-neutral-800 space-y-1">
-              <div className="font-semibold text-neutral-950 dark:text-white">Safety Retention</div>
-              <p className="text-neutral-600 dark:text-neutral-400">
-                Einige Anbieter speichern Anfragen vorübergehend ausschließlich zur Missbrauchs- und Sicherheitserkennung, schließen sie aber vom Modelltraining aus.
-              </p>
-            </div>
-            <div className="p-3.5 rounded-md bg-neutral-50 dark:bg-[#080B10] border border-neutral-200 dark:border-neutral-800 space-y-1">
-              <div className="font-semibold text-neutral-950 dark:text-white">Zero Data Retention (ZDR)</div>
-              <p className="text-neutral-600 dark:text-neutral-400">
-                ZDR-Anbieter löschen Prompts direkt nach der Antwortgenerierung. ZDR wird von dieser App nicht automatisch erzwungen, sondern über deine <strong>OpenRouter-Konto-Filter</strong> gesteuert.
-              </p>
-            </div>
+        {isEn ? (
+          <div className="text-sm leading-relaxed text-neutral-700 dark:text-neutral-300 space-y-2">
+            <p>
+              OpenRouter forwards your prompt to the upstream provider hosting the selected model (e.g. Google,
+              Anthropic, OpenAI, Mistral, Meta/Llama hosters, Qwen, DeepSeek, or third-party inference clouds). Each
+              provider operates under its own retention and training policies.
+            </p>
+            <p className="text-xs text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/60 rounded-md p-3">
+              <strong>Important note on free models (<span className="font-mono">:free</span> / <span className="font-mono">openrouter/free</span>):</strong>{' '}
+              Many free inference endpoints reserve the right to log prompts or use inputs for model improvement and
+              evaluation. Do not send confidential, personal, or NDA-protected texts to unverified free endpoints.
+            </p>
           </div>
-          <p className="text-[11.5px] text-neutral-500 dark:text-neutral-400">
-            Nutzt du einen API-Key eines anderen Anbieters, gelten ausschließlich dessen Datenschutz- und Aufbewahrungsbedingungen (häufig mit Datenverarbeitung außerhalb des EWR, z. B. in den USA).
-          </p>
-        </div>
+        ) : (
+          <div className="text-sm leading-relaxed text-neutral-700 dark:text-neutral-300 space-y-2">
+            <p>
+              OpenRouter leitet deine Anfrage an den jeweiligen Infrastruktur-Anbieter des gewählten Modells weiter
+              (z. B. Google, Anthropic, OpenAI, Mistral oder spezialisierte Hosting-Partner). Für die Verarbeitung durch
+              den Endanbieter gelten dessen eigene Datenschutz- und Aufbewahrungsrichtlinien.
+            </p>
+            <p className="text-xs text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/60 rounded-md p-3">
+              <strong>Hinweis zu Gratis-Modellen (<span className="font-mono">:free</span> / <span className="font-mono">openrouter/free</span>):</strong>{' '}
+              Viele kostenlose Endpunkte behalten sich in ihren Nutzungsbedingungen vor, übermittelte Prompts zur
+              Qualitätssicherung oder für Modelltraining heranzuziehen. Vertrauliche, personenbezogene oder geschützte
+              Texte solltest du daher nicht über unbeschränkte Gratis-Endpunkte verarbeiten.
+            </p>
+          </div>
+        )}
       </section>
 
-      {/* 6. Praxistipps */}
-      <section className="p-5 rounded-lg border border-neutral-300 dark:border-neutral-800 bg-neutral-50 dark:bg-[#080B10] space-y-2.5">
-        <div className="flex items-center gap-2 text-xs font-semibold text-neutral-950 dark:text-white">
-          <Database className="w-4 h-4" />
-          <span>Empfehlung für sensible Texte</span>
+      {/* 6. Practical Recommendations + Quick Actions */}
+      <section className="rounded-lg border border-neutral-300/90 dark:border-neutral-800 bg-white dark:bg-[#0C1019] p-5 sm:p-6 space-y-4 shadow-2xs">
+        <div className="flex items-center gap-2.5">
+          <Lock className="w-4 h-4 text-neutral-700 dark:text-neutral-300 shrink-0" />
+          <h2 className="text-sm font-semibold text-neutral-950 dark:text-white">
+            {isEn ? '6. Recommendations for Sensitive Texts' : '6. Empfehlungen für sensible Texte'}
+          </h2>
         </div>
-        <ul className="space-y-1.5 text-xs leading-relaxed text-neutral-600 dark:text-neutral-400 list-disc pl-4">
-          <li>
-            Gib bei kostenlosen <span className="font-mono">:free</span>-Modellen keine vertraulichen Geschäftsgeheimnisse, Passwörter oder sensiblen personenbezogenen Daten ein.
-          </li>
-          <li>
-            Prüfe in deinen{' '}
-            <a
-              href="https://openrouter.ai/settings/privacy"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="underline text-neutral-800 dark:text-neutral-200"
-            >
-              OpenRouter Privacy-Settings
-            </a>
-            , ob Data-Training-Anbieter blockiert und Zero Data Retention (ZDR) aktiviert sind.
-          </li>
-          <li>
-            Entferne auf gemeinsam genutzten Geräten deinen hinterlegten API-Key vor dem Verlassen im API-Dialog.
-          </li>
+
+        <ul className="list-disc pl-5 space-y-1.5 text-sm text-neutral-700 dark:text-neutral-300">
+          {isEn ? (
+            <>
+              <li>
+                Enable <strong>Zero Data Retention (ZDR)</strong> in the OpenRouter drawer so OpenRouter only routes
+                requests to endpoints that contractually do not retain prompts or completions.
+              </li>
+              <li>
+                Verify your account-level privacy switches in your{' '}
+                <a
+                  href="https://openrouter.ai/settings/privacy"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline underline-offset-4 text-neutral-950 dark:text-white"
+                >
+                  OpenRouter Privacy Settings
+                </a>
+                .
+              </li>
+              <li>
+                On shared or public computers, clear your API key and local browser storage after finishing your work.
+              </li>
+            </>
+          ) : (
+            <>
+              <li>
+                Aktiviere im OpenRouter-Menü <strong>Zero Data Retention (ZDR)</strong>, damit Anfragen nur an
+                Anbieter-Endpunkte geroutet werden, die Prompts und Antworten vertraglich nicht speichern.
+              </li>
+              <li>
+                Prüfe die globalen Datenschutzeinstellungen direkt in deinem Konto unter{' '}
+                <a
+                  href="https://openrouter.ai/settings/privacy"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline underline-offset-4 text-neutral-950 dark:text-white"
+                >
+                  OpenRouter Privacy Settings
+                </a>
+                .
+              </li>
+              <li>
+                Lösche auf gemeinsam genutzten Rechnern nach Abschluss deiner Arbeit deinen API-Key und den lokalen
+                Browser-Speicher.
+              </li>
+            </>
+          )}
         </ul>
+
+        <div className="pt-2 flex flex-wrap items-center gap-3 border-t border-neutral-200 dark:border-neutral-800">
+          <button
+            type="button"
+            onClick={onOpenSettings}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-md bg-neutral-950 dark:bg-white text-white dark:text-neutral-950 hover:opacity-90 transition-opacity cursor-pointer"
+          >
+            <KeyRound className="w-3.5 h-3.5" />
+            {isEn ? 'Open OpenRouter & ZDR Settings' : 'OpenRouter & ZDR-Einstellungen öffnen'}
+          </button>
+
+          <a
+            href="https://michaelfoertsch.de/impressum.html"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium rounded-md border border-neutral-300 dark:border-neutral-700 text-neutral-700 dark:text-neutral-300 hover:text-neutral-950 dark:hover:text-white hover:border-neutral-900 dark:hover:border-neutral-100 transition-colors"
+          >
+            <span>{isEn ? 'Legal Notice / Imprint' : 'Zum Impressum'}</span>
+            <ExternalLink className="w-3.5 h-3.5" />
+          </a>
+        </div>
       </section>
     </div>
   );

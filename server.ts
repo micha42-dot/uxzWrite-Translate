@@ -60,6 +60,7 @@ interface StoredOpenRouterConfig {
   model?: string;
   dualReviewEnabled?: boolean;
   secondaryModel?: string;
+  enforceZdr?: boolean;
   paidUnlocked?: boolean;
   keyInfo?: {
     label?: string | null;
@@ -149,6 +150,8 @@ interface HistoryEntry {
   sourceText: string;
   refinedText: string;
   sourceLang: string;
+  targetLang?: string;
+  task?: 'rewrite' | 'translate';
   mode: 'correction' | 'style';
   style: string;
   model: string;
@@ -271,6 +274,7 @@ function resolveOpenRouterAuth(req: Request): {
   model: string;
   dualReviewEnabled: boolean;
   secondaryModel: string;
+  enforceZdr: boolean;
   paidUnlocked: boolean;
   keyInfo: StoredOpenRouterConfig['keyInfo'];
 } {
@@ -285,6 +289,7 @@ function resolveOpenRouterAuth(req: Request): {
   const model = parsed?.model?.trim() || DEFAULT_MODEL;
   const dualReviewEnabled = Boolean(parsed?.dualReviewEnabled);
   const secondaryModel = parsed?.secondaryModel?.trim() || DEFAULT_MODEL;
+  const enforceZdr = Boolean(parsed?.enforceZdr);
   const paidUnlocked = Boolean(parsed?.paidUnlocked);
 
   if (sessionKey) {
@@ -294,6 +299,7 @@ function resolveOpenRouterAuth(req: Request): {
       model,
       dualReviewEnabled,
       secondaryModel,
+      enforceZdr,
       paidUnlocked,
       keyInfo: parsed?.keyInfo ?? null,
     };
@@ -306,6 +312,7 @@ function resolveOpenRouterAuth(req: Request): {
       model,
       dualReviewEnabled,
       secondaryModel,
+      enforceZdr,
       paidUnlocked,
       keyInfo: null,
     };
@@ -317,6 +324,7 @@ function resolveOpenRouterAuth(req: Request): {
     model,
     dualReviewEnabled,
     secondaryModel,
+    enforceZdr,
     paidUnlocked,
     keyInfo: null,
   };
@@ -388,7 +396,7 @@ interface StoredWritingPreferences {
 const DEFAULT_SETTINGS_SERVER: StoredWorkspaceSettings = {
   defaultSourceLang: 'auto',
   defaultTargetLang: 'en-US',
-  enabledLanguages: ['de', 'en-US', 'en-GB', 'fr', 'es', 'it', 'nl', 'pt', 'pl'],
+  enabledLanguages: ['de', 'en-US', 'en-GB', 'fr', 'es', 'it', 'nl', 'pt', 'pl', 'tlh'],
   defaultWriteMode: 'style',
   defaultWriteStyle: 'ausgewogen',
   defaultTranslationTone: 'neutral',
@@ -765,6 +773,7 @@ async function startServer() {
       model: effectiveModel,
       dualReviewEnabled: auth.dualReviewEnabled,
       secondaryModel: effectiveSecondary,
+      enforceZdr: auth.enforceZdr,
       paidModelsUnlocked: auth.paidUnlocked,
       paidModelsPasswordConfigured: isPaidPasswordConfigured(),
       keyInfo: auth.keyInfo ?? null,
@@ -800,6 +809,7 @@ async function startServer() {
       model: existing?.model || DEFAULT_MODEL,
       dualReviewEnabled: Boolean(existing?.dualReviewEnabled),
       secondaryModel: existing?.secondaryModel || DEFAULT_MODEL,
+      enforceZdr: Boolean(existing?.enforceZdr),
       paidUnlocked: true,
       keyInfo: existing?.keyInfo ?? null,
       updatedAt: new Date().toISOString(),
@@ -817,6 +827,7 @@ async function startServer() {
       model: payload.model,
       dualReviewEnabled: Boolean(payload.dualReviewEnabled),
       secondaryModel: payload.secondaryModel || DEFAULT_MODEL,
+      enforceZdr: Boolean(payload.enforceZdr),
       paidModelsUnlocked: true,
       paidModelsPasswordConfigured: true,
       keyInfo: existing?.apiKey ? existing.keyInfo ?? null : auth.keyInfo ?? null,
@@ -842,6 +853,7 @@ async function startServer() {
       model: nextModel,
       dualReviewEnabled: Boolean(existing?.dualReviewEnabled),
       secondaryModel: nextSecondary,
+      enforceZdr: Boolean(existing?.enforceZdr),
       paidUnlocked: false,
       keyInfo: existing?.keyInfo ?? null,
       updatedAt: new Date().toISOString(),
@@ -861,6 +873,7 @@ async function startServer() {
       model: nextModel,
       dualReviewEnabled: Boolean(payload.dualReviewEnabled),
       secondaryModel: nextSecondary,
+      enforceZdr: Boolean(payload.enforceZdr),
       paidModelsUnlocked: false,
       paidModelsPasswordConfigured: isPaidPasswordConfigured(),
       keyInfo: existing?.apiKey ? existing.keyInfo ?? null : null,
@@ -869,11 +882,12 @@ async function startServer() {
 
   app.post('/api/openrouter/config', async (req: Request, res: Response) => {
     ensureSessionId(req, res);
-    const { apiKey, model, dualReviewEnabled, secondaryModel } = req.body as {
+    const { apiKey, model, dualReviewEnabled, secondaryModel, enforceZdr } = req.body as {
       apiKey?: string;
       model?: string;
       dualReviewEnabled?: boolean;
       secondaryModel?: string;
+      enforceZdr?: boolean;
     };
 
     const cookies = parseCookies(req);
@@ -968,11 +982,17 @@ async function startServer() {
         ? secondaryModel.trim()
         : existing?.secondaryModel || DEFAULT_MODEL;
 
+    const nextEnforceZdr =
+      typeof enforceZdr === 'boolean'
+        ? enforceZdr
+        : Boolean(existing?.enforceZdr);
+
     const payload: StoredOpenRouterConfig = {
       apiKey: nextApiKey,
       model: nextModel,
       dualReviewEnabled: nextDualReview,
       secondaryModel: nextSecondaryModel,
+      enforceZdr: nextEnforceZdr,
       paidUnlocked,
       keyInfo: nextKeyInfo,
       updatedAt: new Date().toISOString(),
@@ -992,6 +1012,7 @@ async function startServer() {
       model: nextModel,
       dualReviewEnabled: nextDualReview,
       secondaryModel: nextSecondaryModel,
+      enforceZdr: nextEnforceZdr,
       paidModelsUnlocked: paidUnlocked,
       paidModelsPasswordConfigured: isPaidPasswordConfigured(),
       keyInfo: nextApiKey ? nextKeyInfo : null,
@@ -1005,11 +1026,18 @@ async function startServer() {
     const existing = existingSealed ? unsealPayload(existingSealed) : null;
     const paidUnlocked = Boolean(existing?.paidUnlocked);
 
-    if (existing?.model || paidUnlocked || existing?.dualReviewEnabled || existing?.secondaryModel) {
+    if (
+      existing?.model ||
+      paidUnlocked ||
+      existing?.dualReviewEnabled ||
+      existing?.secondaryModel ||
+      existing?.enforceZdr
+    ) {
       const sealed = sealPayload({
         model: existing?.model || DEFAULT_MODEL,
         dualReviewEnabled: Boolean(existing?.dualReviewEnabled),
         secondaryModel: existing?.secondaryModel || DEFAULT_MODEL,
+        enforceZdr: Boolean(existing?.enforceZdr),
         paidUnlocked,
         updatedAt: new Date().toISOString(),
       });
@@ -1028,6 +1056,7 @@ async function startServer() {
       model: existing?.model || DEFAULT_MODEL,
       dualReviewEnabled: Boolean(existing?.dualReviewEnabled),
       secondaryModel: existing?.secondaryModel || DEFAULT_MODEL,
+      enforceZdr: Boolean(existing?.enforceZdr),
       paidModelsUnlocked: paidUnlocked,
       paidModelsPasswordConfigured: isPaidPasswordConfigured(),
       keyInfo: null,
@@ -1135,7 +1164,9 @@ async function startServer() {
         model: targetModel,
         stream: true,
         temperature: promptConfig.temperature,
-        provider: { sort: 'latency' },
+        provider: auth.enforceZdr
+          ? { sort: 'latency', zdr: true, data_collection: 'deny' }
+          : { sort: 'latency' },
         messages: [
           { role: 'system', content: promptConfig.system },
           { role: 'user', content: userContent },
@@ -1306,7 +1337,9 @@ async function startServer() {
       const payload = {
         model: auth.model,
         temperature: 0.7,
-        provider: { sort: 'latency' },
+        provider: auth.enforceZdr
+          ? { sort: 'latency', zdr: true, data_collection: 'deny' }
+          : { sort: 'latency' },
         messages: [
           {
             role: 'system',
@@ -1413,7 +1446,9 @@ async function startServer() {
       const payload = {
         model: auth.model,
         temperature: 0,
-        provider: { sort: 'latency' },
+        provider: auth.enforceZdr
+          ? { sort: 'latency', zdr: true, data_collection: 'deny' }
+          : { sort: 'latency' },
         messages: [
           {
             role: 'system',
@@ -1528,7 +1563,8 @@ async function startServer() {
 
   app.post('/api/history', (req: Request, res: Response) => {
     const sid = ensureSessionId(req, res);
-    const { sourceText, refinedText, sourceLang, mode, style, model, changes } = req.body as Partial<HistoryEntry>;
+    const { sourceText, refinedText, sourceLang, targetLang, task, mode, style, model, changes } =
+      req.body as Partial<HistoryEntry>;
 
     if (!sourceText || !refinedText) {
       res.status(400).json({ error: 'Quell- und Zieltext sind erforderlich.' });
@@ -1542,7 +1578,9 @@ async function startServer() {
       existing[0].sourceText === sourceText &&
       existing[0].refinedText === refinedText &&
       existing[0].style === style &&
-      existing[0].mode === mode
+      existing[0].mode === mode &&
+      existing[0].task === task &&
+      existing[0].targetLang === targetLang
     ) {
       res.json({ entry: existing[0], entries: existing });
       return;
@@ -1553,6 +1591,8 @@ async function startServer() {
       sourceText: sourceText.slice(0, 40000),
       refinedText: refinedText.slice(0, 40000),
       sourceLang: sourceLang || 'auto',
+      targetLang: typeof targetLang === 'string' && VALID_TARGET_LANGS.has(targetLang) ? targetLang : undefined,
+      task: task === 'translate' ? 'translate' : 'rewrite',
       mode: mode === 'correction' ? 'correction' : 'style',
       style: style || 'ausgewogen',
       model: model || DEFAULT_MODEL,
