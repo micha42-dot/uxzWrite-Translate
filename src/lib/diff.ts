@@ -413,7 +413,7 @@ export interface ParagraphChunk {
  * Splits multi-paragraph text along blank lines into balanced chunks
  * while preserving exact inter-paragraph separators.
  */
-export function splitIntoParagraphChunks(text: string, maxChunkChars = 1200): ParagraphChunk[] {
+export function splitIntoParagraphChunks(text: string, maxChunkChars = 2400): ParagraphChunk[] {
   if (!text.trim()) return [];
   const parts = text.split(/(\r?\n\s*\r?\n+)/);
   const paragraphs: ParagraphChunk[] = [];

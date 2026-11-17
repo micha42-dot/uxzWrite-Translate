@@ -369,6 +369,14 @@ interface StoredWorkspaceSettings {
   defaultTranslationTone: 'neutral' | 'formal' | 'informal';
   defaultInstantMode: boolean;
   defaultChunkingEnabled: boolean;
+  typingDebounceMs: number;
+  pasteDebounceMs: number;
+  chunkMaxChars: number;
+  minRequestSpacingMs: number;
+  freeModelConcurrency: number;
+  paidModelConcurrency: number;
+  rateLimitRetries: number;
+  skipAnalyzeOnRateLimit: boolean;
 }
 
 interface StoredWritingPreferences {
@@ -386,6 +394,14 @@ const DEFAULT_SETTINGS_SERVER: StoredWorkspaceSettings = {
   defaultTranslationTone: 'neutral',
   defaultInstantMode: true,
   defaultChunkingEnabled: true,
+  typingDebounceMs: 1100,
+  pasteDebounceMs: 250,
+  chunkMaxChars: 2400,
+  minRequestSpacingMs: 450,
+  freeModelConcurrency: 1,
+  paidModelConcurrency: 2,
+  rateLimitRetries: 2,
+  skipAnalyzeOnRateLimit: true,
 };
 
 const VALID_TARGET_LANGS = new Set(Object.keys(TARGET_LANGUAGE_NAMES));
@@ -412,6 +428,12 @@ function getPreferencesFilePath(sid: string): string {
     throw new Error('Invalid session identifier');
   }
   return path.join(PREFS_DIR, `${sid}.json`);
+}
+
+function clampInt(val: unknown, fallback: number, min: number, max: number): number {
+  const num = typeof val === 'number' ? val : Number(val);
+  if (!Number.isFinite(num)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(num)));
 }
 
 function sanitizeSettings(raw: unknown): StoredWorkspaceSettings {
@@ -460,6 +482,14 @@ function sanitizeSettings(raw: unknown): StoredWorkspaceSettings {
     defaultTranslationTone,
     defaultInstantMode: s.defaultInstantMode !== false,
     defaultChunkingEnabled: s.defaultChunkingEnabled !== false,
+    typingDebounceMs: clampInt(s.typingDebounceMs, DEFAULT_SETTINGS_SERVER.typingDebounceMs, 250, 3000),
+    pasteDebounceMs: clampInt(s.pasteDebounceMs, DEFAULT_SETTINGS_SERVER.pasteDebounceMs, 50, 1500),
+    chunkMaxChars: clampInt(s.chunkMaxChars, DEFAULT_SETTINGS_SERVER.chunkMaxChars, 600, 6000),
+    minRequestSpacingMs: clampInt(s.minRequestSpacingMs, DEFAULT_SETTINGS_SERVER.minRequestSpacingMs, 0, 3000),
+    freeModelConcurrency: clampInt(s.freeModelConcurrency, DEFAULT_SETTINGS_SERVER.freeModelConcurrency, 1, 4),
+    paidModelConcurrency: clampInt(s.paidModelConcurrency, DEFAULT_SETTINGS_SERVER.paidModelConcurrency, 1, 4),
+    rateLimitRetries: clampInt(s.rateLimitRetries, DEFAULT_SETTINGS_SERVER.rateLimitRetries, 0, 4),
+    skipAnalyzeOnRateLimit: s.skipAnalyzeOnRateLimit !== false,
   };
 }
 
@@ -611,6 +641,109 @@ async function isModelFreeById(modelId: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+async function sleepWithSignal(ms: number, signal?: AbortSignal): Promise<void> {
+  if (ms <= 0) return;
+  await new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new Error('Aborted'));
+      return;
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new Error('Aborted'));
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+function parseServerRetryAfterMs(headers: Headers, bodyText: string, attempt: number): number {
+  const retryAfter = headers.get('retry-after');
+  if (retryAfter) {
+    const sec = Number(retryAfter);
+    if (Number.isFinite(sec) && sec > 0) {
+      return Math.min(20000, Math.max(1000, Math.round(sec * 1000)));
+    }
+    const dateMs = Date.parse(retryAfter);
+    if (Number.isFinite(dateMs)) {
+      const diff = dateMs - Date.now();
+      if (diff > 0) return Math.min(20000, Math.max(1000, diff));
+    }
+  }
+  const match = bodyText.match(/try again in\s+(\d+(?:\.\d+)?)\s*(s|sec|seconds|ms)?/i);
+  if (match) {
+    const val = Number(match[1]);
+    if (Number.isFinite(val) && val > 0) {
+      const ms = match[2]?.toLowerCase() === 'ms' ? val : val * 1000;
+      return Math.min(20000, Math.max(1000, Math.round(ms)));
+    }
+  }
+  return (attempt === 0 ? 2500 : 5000) + Math.floor(Math.random() * 500);
+}
+
+async function fetchOpenRouterChatWithRetry(params: {
+  apiKey: string;
+  appUrl: string;
+  baseBody: Record<string, unknown>;
+  signal?: AbortSignal;
+  maxRetries?: number;
+}): Promise<{ upstream: Awaited<ReturnType<typeof fetch>>; errPreview?: string }> {
+  const maxRetries = params.maxRetries ?? 2;
+  let includeReasoningNone = true;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const bodyPayload = includeReasoningNone
+      ? { ...params.baseBody, reasoning: { effort: 'none' } }
+      : params.baseBody;
+
+    let upstream = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      signal: params.signal,
+      headers: {
+        Authorization: `Bearer ${params.apiKey}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': params.appUrl,
+        'X-Title': 'ÜxzWrite & Translate',
+      },
+      body: JSON.stringify(bodyPayload),
+    });
+
+    if (upstream.status === 400 && includeReasoningNone) {
+      const preview = await upstream.text().catch(() => '');
+      if (/reasoning|effort/i.test(preview)) {
+        includeReasoningNone = false;
+        upstream = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          signal: params.signal,
+          headers: {
+            Authorization: `Bearer ${params.apiKey}`,
+            'Content-Type': 'application/json',
+            'HTTP-Referer': params.appUrl,
+            'X-Title': 'ÜxzWrite & Translate',
+          },
+          body: JSON.stringify(params.baseBody),
+        });
+      } else {
+        return { upstream, errPreview: preview };
+      }
+    }
+
+    if ((upstream.status === 429 || upstream.status === 503) && attempt < maxRetries) {
+      const errText = await upstream.text().catch(() => '');
+      const waitMs = parseServerRetryAfterMs(upstream.headers, errText, attempt);
+      await sleepWithSignal(waitMs, params.signal);
+      continue;
+    }
+
+    return { upstream };
+  }
+
+  throw new Error('OpenRouter-Anfrage nach Wiederholungen fehlgeschlagen.');
 }
 
 async function startServer() {
@@ -1009,47 +1142,24 @@ async function startServer() {
         ],
       };
 
-      let upstream = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
+      const { upstream, errPreview } = await fetchOpenRouterChatWithRetry({
+        apiKey: auth.apiKey,
+        appUrl,
+        baseBody,
         signal: abortController.signal,
-        headers: {
-          Authorization: `Bearer ${auth.apiKey}`,
-          'Content-Type': 'application/json',
-          'HTTP-Referer': appUrl,
-          'X-Title': 'ÜxzWrite & Translate',
-        },
-        body: JSON.stringify({
-          ...baseBody,
-          reasoning: { effort: 'none' },
-        }),
+        maxRetries: 2,
       });
 
-      // Fallback cleanly if user chose a reasoning-mandatory model that rejects effort:"none"
-      if (upstream.status === 400) {
-        const errPreview = await upstream.text().catch(() => '');
-        if (/reasoning|effort/i.test(errPreview)) {
-          upstream = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-            method: 'POST',
-            signal: abortController.signal,
-            headers: {
-              Authorization: `Bearer ${auth.apiKey}`,
-              'Content-Type': 'application/json',
-              'HTTP-Referer': appUrl,
-              'X-Title': 'ÜxzWrite & Translate',
-            },
-            body: JSON.stringify(baseBody),
-          });
-        } else {
-          let message = `OpenRouter-Fehler (HTTP 400)`;
-          try {
-            const parsed = JSON.parse(errPreview) as { error?: { message?: string } };
-            if (parsed?.error?.message) message = parsed.error.message;
-          } catch {
-            if (errPreview) message = `${message}: ${errPreview.slice(0, 240)}`;
-          }
-          res.status(400).json({ error: message });
-          return;
+      if (errPreview !== undefined) {
+        let message = `OpenRouter-Fehler (HTTP 400)`;
+        try {
+          const parsed = JSON.parse(errPreview) as { error?: { message?: string } };
+          if (parsed?.error?.message) message = parsed.error.message;
+        } catch {
+          if (errPreview) message = `${message}: ${errPreview.slice(0, 240)}`;
         }
+        res.status(400).json({ error: message });
+        return;
       }
 
       if (!upstream.ok || !upstream.body) {
@@ -1217,34 +1327,16 @@ async function startServer() {
         ],
       };
 
-      let upstream = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${auth.apiKey}`,
-          'Content-Type': 'application/json',
-          'HTTP-Referer': appUrl,
-          'X-Title': 'ÜxzWrite & Translate',
-        },
-        body: JSON.stringify({ ...payload, reasoning: { effort: 'none' } }),
+      const { upstream, errPreview } = await fetchOpenRouterChatWithRetry({
+        apiKey: auth.apiKey,
+        appUrl,
+        baseBody: payload,
+        maxRetries: 1,
       });
 
-      if (upstream.status === 400) {
-        const preview = await upstream.text().catch(() => '');
-        if (/reasoning|effort/i.test(preview)) {
-          upstream = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-              Authorization: `Bearer ${auth.apiKey}`,
-              'Content-Type': 'application/json',
-              'HTTP-Referer': appUrl,
-              'X-Title': 'ÜxzWrite & Translate',
-            },
-            body: JSON.stringify(payload),
-          });
-        } else {
-          res.status(400).json({ error: `Alternativen fehlgeschlagen: ${preview.slice(0, 200)}` });
-          return;
-        }
+      if (errPreview !== undefined) {
+        res.status(400).json({ error: `Alternativen fehlgeschlagen: ${errPreview.slice(0, 200)}` });
+        return;
       }
 
       if (!upstream.ok) {

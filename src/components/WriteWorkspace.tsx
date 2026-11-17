@@ -32,6 +32,7 @@ import {
 } from '../lib/diff';
 import {
   CHANGE_CATEGORY_LABELS,
+  DEFAULT_WORKSPACE_SETTINGS,
   SOURCE_LANGUAGES,
   WRITING_STYLES,
 } from '../types';
@@ -67,6 +68,7 @@ interface WriteWorkspaceProps {
   onChangeChanges: (val: ChangeItem[]) => void;
   onOpenSettings: () => void;
   onRequestUnlock: () => void;
+  onSelectModel?: (modelId: string) => Promise<void>;
   onSaveHistory: (entry: {
     sourceText: string;
     refinedText: string;
@@ -100,6 +102,7 @@ export function WriteWorkspace({
   onChangeChanges,
   onOpenSettings,
   onRequestUnlock,
+  onSelectModel,
   onSaveHistory,
 }: WriteWorkspaceProps) {
   const [outputView, setOutputView] = useState<OutputViewMode>('diff');
@@ -118,7 +121,9 @@ export function WriteWorkspace({
   const [activeRunPhase, setActiveRunPhase] = useState<'primary' | 'chunked' | 'review' | 'verify' | null>(null);
   const [activeRunModel, setActiveRunModel] = useState<string | null>(null);
   const [analyzingChanges, setAnalyzingChanges] = useState(false);
+  const [rateLimitNotice, setRateLimitNotice] = useState<{ attempt: number; waitSeconds: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isRateLimitError, setIsRateLimitError] = useState(false);
   const [copied, setCopied] = useState(false);
   const [savedFlag, setSavedFlag] = useState(false);
 
@@ -328,13 +333,18 @@ export function WriteWorkspace({
 
       setIsStreaming(true);
       setActiveRunModel(status.model);
+      setRateLimitNotice(null);
       setError(null);
+      setIsRateLimitError(false);
       setSelectedSentence(null);
       setAlternatives([]);
       onChangeChanges([]);
 
       try {
-        const chunks = chunkingEnabled ? splitIntoParagraphChunks(textToProcess) : [];
+        const wsSettings = preferences.settings ?? DEFAULT_WORKSPACE_SETTINGS;
+        const chunks = chunkingEnabled
+          ? splitIntoParagraphChunks(textToProcess, wsSettings.chunkMaxChars)
+          : [];
         let pass1Text = '';
 
         if (chunks.length >= 2) {
@@ -355,7 +365,12 @@ export function WriteWorkspace({
 
           let nextIndex = 0;
           let chunkError: string | null = null;
-          const workerCount = Math.min(4, chunks.length);
+          let chunkIsRateLimit = false;
+          const isFreeModel = status.model === 'openrouter/free' || status.model.endsWith(':free');
+          const desiredWorkers = isFreeModel
+            ? wsSettings.freeModelConcurrency
+            : wsSettings.paidModelConcurrency;
+          const workerCount = Math.min(Math.max(1, desiredWorkers), chunks.length);
 
           const worker = async () => {
             while (nextIndex < chunks.length) {
@@ -372,13 +387,16 @@ export function WriteWorkspace({
                 previousContext,
                 preferences,
                 signal: controller.signal,
+                onRetryNotice: setRateLimitNotice,
                 onDelta: (acc) => {
+                  setRateLimitNotice(null);
                   outputs[idx] = acc;
                   onChangeRefinedText(assembleChunks());
                 },
               });
               if (!res.ok) {
                 chunkError = res.error;
+                chunkIsRateLimit = Boolean(res.isRateLimit);
                 controller.abort();
                 return;
               }
@@ -391,6 +409,8 @@ export function WriteWorkspace({
 
           if (chunkError) {
             setError(chunkError);
+            setIsRateLimitError(chunkIsRateLimit);
+            setRateLimitNotice(null);
             setIsStreaming(false);
             setActiveRunPhase(null);
             setActiveRunModel(null);
@@ -410,13 +430,17 @@ export function WriteWorkspace({
             model: status.model,
             preferences,
             signal: controller.signal,
+            onRetryNotice: setRateLimitNotice,
             onDelta: (accumulated) => {
+              setRateLimitNotice(null);
               onChangeRefinedText(accumulated);
             },
           });
 
           if (!result.ok) {
             setError(result.error);
+            setIsRateLimitError(Boolean(result.isRateLimit));
+            setRateLimitNotice(null);
             setIsStreaming(false);
             setActiveRunPhase(null);
             setActiveRunModel(null);
@@ -442,7 +466,9 @@ export function WriteWorkspace({
             model: reviewModel,
             preferences,
             signal: controller.signal,
+            onRetryNotice: setRateLimitNotice,
             onDelta: (accumulated) => {
+              setRateLimitNotice(null);
               if (accumulated) {
                 onChangeRefinedText(accumulated);
               }
@@ -451,6 +477,8 @@ export function WriteWorkspace({
 
           if (!reviewResult.ok) {
             setError(reviewResult.error);
+            setIsRateLimitError(Boolean(reviewResult.isRateLimit));
+            setRateLimitNotice(null);
             setIsStreaming(false);
             setActiveRunPhase(null);
             setActiveRunModel(null);
@@ -463,6 +491,7 @@ export function WriteWorkspace({
           }
         }
 
+        setRateLimitNotice(null);
         setIsStreaming(false);
         setActiveRunPhase(null);
         setActiveRunModel(null);
@@ -475,6 +504,8 @@ export function WriteWorkspace({
           return;
         }
         setError(err instanceof Error ? err.message : 'Verbindungsfehler beim Verfeinern.');
+        setIsRateLimitError(false);
+        setRateLimitNotice(null);
         setIsStreaming(false);
         setActiveRunPhase(null);
         setActiveRunModel(null);
@@ -507,7 +538,9 @@ export function WriteWorkspace({
     setIsStreaming(true);
     setActiveRunPhase('verify');
     setActiveRunModel(verifyModel);
+    setRateLimitNotice(null);
     setError(null);
+    setIsRateLimitError(false);
     setSelectedSentence(null);
     setAlternatives([]);
 
@@ -522,19 +555,23 @@ export function WriteWorkspace({
         model: verifyModel,
         preferences,
         signal: controller.signal,
+        onRetryNotice: setRateLimitNotice,
         onDelta: (accumulated) => {
+          setRateLimitNotice(null);
           if (accumulated) {
             onChangeRefinedText(accumulated);
           }
         },
       });
 
+      setRateLimitNotice(null);
       setIsStreaming(false);
       setActiveRunPhase(null);
       setActiveRunModel(null);
 
       if (!result.ok) {
         setError(result.error);
+        setIsRateLimitError(Boolean(result.isRateLimit));
         return;
       }
 
@@ -547,6 +584,8 @@ export function WriteWorkspace({
         return;
       }
       setError(err instanceof Error ? err.message : 'Verbindungsfehler bei der Nachprüfung.');
+      setIsRateLimitError(false);
+      setRateLimitNotice(null);
       setIsStreaming(false);
       setActiveRunPhase(null);
       setActiveRunModel(null);
@@ -580,7 +619,8 @@ export function WriteWorkspace({
     const signature = `${sourceLang}|${mode}|${style}|${status.model}|${preferencesSignature}|${sourceText}`;
     if (signature === lastTriggeredSignatureRef.current) return;
 
-    const delay = pasteTriggeredRef.current ? 60 : 420;
+    const wsSettings = preferences.settings ?? DEFAULT_WORKSPACE_SETTINGS;
+    const delay = pasteTriggeredRef.current ? wsSettings.pasteDebounceMs : wsSettings.typingDebounceMs;
     pasteTriggeredRef.current = false;
 
     const timer = window.setTimeout(() => {
@@ -595,6 +635,7 @@ export function WriteWorkspace({
     style,
     status.configured,
     status.model,
+    preferences.settings,
     preferencesSignature,
     instantMode,
     runRewrite,
@@ -607,6 +648,7 @@ export function WriteWorkspace({
       abortRef.current.abort();
       abortRef.current = null;
     }
+    setRateLimitNotice(null);
     setIsStreaming(false);
     setActiveRunPhase(null);
     setActiveRunModel(null);
@@ -631,6 +673,7 @@ export function WriteWorkspace({
     onChangeRefinedText('');
     onChangeChanges([]);
     setError(null);
+    setIsRateLimitError(false);
     setSelectedSentence(null);
     setAlternatives([]);
     lastTriggeredSignatureRef.current = '';
@@ -975,7 +1018,7 @@ export function WriteWorkspace({
                   <div className="space-y-2.5 text-xs leading-relaxed text-neutral-600 dark:text-neutral-300">
                     <div>
                       <span className="font-semibold text-neutral-900 dark:text-neutral-100">An:</span>{' '}
-                      Verfeinert automatisch direkt beim Einfügen (<span className="font-mono tabular-nums">60 ms</span>), nach kurzen Tipp-Pausen (<span className="font-mono tabular-nums">420 ms</span>) sowie bei jedem Stil- oder Sprachwechsel.
+                      Verfeinert automatisch kurz nach dem Einfügen (<span className="font-mono tabular-nums">{preferences.settings?.pasteDebounceMs ?? DEFAULT_WORKSPACE_SETTINGS.pasteDebounceMs} ms</span>), nach ruhigen Tipp-Pausen (<span className="font-mono tabular-nums">{preferences.settings?.typingDebounceMs ?? DEFAULT_WORKSPACE_SETTINGS.typingDebounceMs} ms</span>) sowie bei Stil- oder Sprachwechsel.
                     </div>
                     <div className="pt-2 border-t border-neutral-200 dark:border-neutral-800">
                       <span className="font-semibold text-neutral-900 dark:text-neutral-100">Aus:</span>{' '}
@@ -1012,7 +1055,7 @@ export function WriteWorkspace({
       </div>
 
       {/* Main Two-Column Editor */}
-      <div className="border border-neutral-300/90 dark:border-neutral-800 rounded-lg bg-white dark:bg-[#0C1019] shadow-sm overflow-hidden grid grid-cols-1 lg:grid-cols-2 lg:divide-x lg:divide-neutral-300/90 dark:lg:divide-neutral-800 min-h-[540px] lg:h-[calc(100vh-188px)]">
+      <div className="border border-neutral-300/90 dark:border-neutral-800 rounded-lg bg-white dark:bg-[#0C1019] shadow-sm overflow-hidden grid grid-cols-1 lg:grid-cols-2 lg:divide-x lg:divide-neutral-300/90 dark:lg:divide-neutral-800 min-h-[480px] lg:h-[calc(100vh-232px)]">
         {/* Left Column: Original */}
         <section className="flex flex-col min-h-[320px] lg:min-h-0 bg-[#FAFAFA] dark:bg-[#080B10]">
           <div className="h-12 px-5 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between gap-3 shrink-0">
@@ -1154,14 +1197,16 @@ export function WriteWorkspace({
               {isStreaming ? (
                 <span className="inline-flex items-center gap-1.5 text-blue-700 dark:text-blue-400 font-medium min-w-0">
                   <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
-                  <span className="truncate max-w-[240px] font-mono">
-                    {activeRunPhase === 'review'
-                      ? `Zweitprüfung · ${activeRunModel || status.secondaryModel}`
-                      : activeRunPhase === 'verify'
-                        ? `Nachprüfung · ${activeRunModel || status.model}`
-                        : activeRunPhase === 'chunked'
-                          ? `Absätze · ${activeRunModel || status.model}`
-                          : activeRunModel || status.model}
+                  <span className="truncate max-w-[260px] font-mono">
+                    {rateLimitNotice
+                      ? `Rate-Limit · Neuversuch (${rateLimitNotice.attempt}) in ${rateLimitNotice.waitSeconds} s…`
+                      : activeRunPhase === 'review'
+                        ? `Zweitprüfung · ${activeRunModel || status.secondaryModel}`
+                        : activeRunPhase === 'verify'
+                          ? `Nachprüfung · ${activeRunModel || status.model}`
+                          : activeRunPhase === 'chunked'
+                            ? `Absätze · ${activeRunModel || status.model}`
+                            : activeRunModel || status.model}
                   </span>
                 </span>
               ) : analyzingChanges ? (
@@ -1209,7 +1254,7 @@ export function WriteWorkspace({
             ) : error ? (
               <div className="p-4 rounded-lg border border-rose-200 dark:border-rose-900/70 bg-rose-50 dark:bg-rose-950/35 space-y-3">
                 <p className="text-sm text-rose-900 dark:text-rose-200">{error}</p>
-                <div className="flex flex-wrap items-center gap-3">
+                <div className="flex flex-wrap items-center gap-2.5">
                   <button
                     type="button"
                     onClick={() => runRewrite(sourceText, sourceLang, mode, style)}
@@ -1217,6 +1262,28 @@ export function WriteWorkspace({
                   >
                     Erneut versuchen
                   </button>
+                  {isRateLimitError && status.model !== 'openrouter/free' && onSelectModel && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        setError(null);
+                        setIsRateLimitError(false);
+                        await onSelectModel('openrouter/free');
+                      }}
+                      className="px-3 py-1.5 text-xs font-medium rounded-md border border-rose-300 dark:border-rose-800 text-rose-800 dark:text-rose-200 hover:bg-rose-100 dark:hover:bg-rose-950/60 cursor-pointer"
+                    >
+                      Free Models Router nutzen
+                    </button>
+                  )}
+                  {isRateLimitError && instantMode && (
+                    <button
+                      type="button"
+                      onClick={() => setInstantMode(false)}
+                      className="px-3 py-1.5 text-xs font-medium rounded-md border border-rose-300 dark:border-rose-800 text-rose-800 dark:text-rose-200 hover:bg-rose-100 dark:hover:bg-rose-950/60 cursor-pointer"
+                    >
+                      Sofort-Modus deaktivieren
+                    </button>
+                  )}
                   {error.includes('Passwort') && (
                     <button
                       type="button"

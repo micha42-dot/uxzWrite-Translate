@@ -183,6 +183,14 @@ export interface WorkspaceSettings {
   defaultTranslationTone: TranslationTone;
   defaultInstantMode: boolean;
   defaultChunkingEnabled: boolean;
+  typingDebounceMs: number;
+  pasteDebounceMs: number;
+  chunkMaxChars: number;
+  minRequestSpacingMs: number;
+  freeModelConcurrency: number;
+  paidModelConcurrency: number;
+  rateLimitRetries: number;
+  skipAnalyzeOnRateLimit: boolean;
 }
 
 export const DEFAULT_WORKSPACE_SETTINGS: WorkspaceSettings = {
@@ -194,6 +202,14 @@ export const DEFAULT_WORKSPACE_SETTINGS: WorkspaceSettings = {
   defaultTranslationTone: 'neutral',
   defaultInstantMode: true,
   defaultChunkingEnabled: true,
+  typingDebounceMs: 1100,
+  pasteDebounceMs: 250,
+  chunkMaxChars: 2400,
+  minRequestSpacingMs: 450,
+  freeModelConcurrency: 1,
+  paidModelConcurrency: 2,
+  rateLimitRetries: 2,
+  skipAnalyzeOnRateLimit: true,
 };
 
 export interface WritingPreferences {

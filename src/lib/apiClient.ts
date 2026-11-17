@@ -98,7 +98,9 @@ function loadInitialPreferences(): WritingPreferences {
     return {
       terms: Array.isArray(parsed.terms) ? parsed.terms : fallback.terms,
       rules: Array.isArray(parsed.rules) ? parsed.rules : fallback.rules,
-      settings: parsed.settings ? { ...fallback.settings, ...parsed.settings } : fallback.settings,
+      settings: parsed.settings
+        ? { ...DEFAULT_WORKSPACE_SETTINGS, ...parsed.settings }
+        : fallback.settings,
     };
   } catch {
     return fallback;
@@ -523,6 +525,74 @@ export async function fetchOpenRouterModels(): Promise<OpenRouterModel[]> {
   return models;
 }
 
+let lastRequestStartMs = 0;
+let rateLimitCooldownUntilMs = 0;
+
+function isRateLimitErrorPayload(status: number, text: string): boolean {
+  if (status === 429) return true;
+  return /rate[\s_-]*limit|requests?\s+per\s+min|too many requests|quota exceeded|rpm/i.test(text);
+}
+
+function parseRetryAfterMs(headers: Headers, bodyText: string, attempt: number): number {
+  const retryAfter = headers.get('retry-after');
+  if (retryAfter) {
+    const sec = Number(retryAfter);
+    if (Number.isFinite(sec) && sec > 0) {
+      return Math.min(20000, Math.max(1000, Math.round(sec * 1000)));
+    }
+    const dateMs = Date.parse(retryAfter);
+    if (Number.isFinite(dateMs)) {
+      const diff = dateMs - Date.now();
+      if (diff > 0) return Math.min(20000, Math.max(1000, diff));
+    }
+  }
+  const match = bodyText.match(/try again in\s+(\d+(?:\.\d+)?)\s*(s|sec|seconds|ms)?/i);
+  if (match) {
+    const val = Number(match[1]);
+    if (Number.isFinite(val) && val > 0) {
+      const ms = match[2]?.toLowerCase() === 'ms' ? val : val * 1000;
+      return Math.min(20000, Math.max(1000, Math.round(ms)));
+    }
+  }
+  const base = attempt === 0 ? 2800 : 5500;
+  const jitter = Math.floor(Math.random() * 600);
+  return base + jitter;
+}
+
+function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (ms <= 0) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException('Aborted', 'AbortError'));
+      return;
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new DOMException('Aborted', 'AbortError'));
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+async function paceOpenRouterCall(signal?: AbortSignal, minSpacingOverrideMs?: number): Promise<void> {
+  const configuredSpacing = memoryPreferences.settings?.minRequestSpacingMs ?? 450;
+  const minSpacingMs = minSpacingOverrideMs ?? configuredSpacing;
+  const now = Date.now();
+  const waitSpacing = Math.max(0, lastRequestStartMs + minSpacingMs - now);
+  if (waitSpacing > 0) {
+    await abortableSleep(waitSpacing, signal);
+  }
+  lastRequestStartMs = Date.now();
+}
+
+function formatFriendlyRateLimitMessage(rawMessage: string): string {
+  return `Anfrage-Limit (Requests pro Minute) erreicht: ${rawMessage} — Tipp: Nutze den „Free Models Router“ (wechselt automatisch zwischen freien Anbietern) oder pausiere den Sofort-Modus.`;
+}
+
 export async function streamRewriteRequest(params: {
   text: string;
   task?: RewriteTask;
@@ -538,74 +608,121 @@ export async function streamRewriteRequest(params: {
   preferences?: WritingPreferences;
   signal: AbortSignal;
   onDelta: (accumulated: string) => void;
-}): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
+  onRetryNotice?: (info: { attempt: number; waitSeconds: number } | null) => void;
+}): Promise<{ ok: true; text: string } | { ok: false; error: string; isRateLimit?: boolean }> {
   const hasBackend = await detectBackend();
+  const activeSettings = params.preferences?.settings ?? memoryPreferences.settings;
+  const MAX_RETRIES = Math.min(4, Math.max(0, activeSettings?.rateLimitRetries ?? 2));
 
   if (hasBackend) {
-    const res = await fetch('./api/rewrite', {
-      method: 'POST',
-      signal: params.signal,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        text: params.text,
-        task: params.task ?? 'rewrite',
-        sourceLang: params.sourceLang,
-        targetLang: params.targetLang,
-        tone: params.tone,
-        mode: params.mode,
-        style: params.style,
-        model: params.model,
-        verify: Boolean(params.verify),
-        originalText: params.originalText,
-        previousContext: params.previousContext,
-        preferences: params.preferences,
-      }),
-    });
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      await paceOpenRouterCall(params.signal);
+      const res = await fetch('./api/rewrite', {
+        method: 'POST',
+        signal: params.signal,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: params.text,
+          task: params.task ?? 'rewrite',
+          sourceLang: params.sourceLang,
+          targetLang: params.targetLang,
+          tone: params.tone,
+          mode: params.mode,
+          style: params.style,
+          model: params.model,
+          verify: Boolean(params.verify),
+          originalText: params.originalText,
+          previousContext: params.previousContext,
+          preferences: params.preferences,
+        }),
+      });
 
-    if (!res.ok) {
-      const errJson = (await res.json().catch(() => null)) as { error?: string } | null;
-      return { ok: false, error: errJson?.error || `Anfrage fehlgeschlagen (HTTP ${res.status}).` };
-    }
-    if (!res.body) {
-      return { ok: false, error: 'Keine Antwort vom Server erhalten.' };
-    }
-
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder('utf-8');
-    let buffer = '';
-    let accumulated = '';
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const frames = buffer.split('\n\n');
-      buffer = frames.pop() ?? '';
-
-      for (const frame of frames) {
-        const line = frame.trim();
-        if (!line.startsWith('data:')) continue;
-        const raw = line.slice(5).trim();
-        if (!raw) continue;
-        try {
-          const parsed = JSON.parse(raw) as { delta?: string; error?: string };
-          if (parsed.error) {
-            return { ok: false, error: parsed.error };
+      if (!res.ok) {
+        const errJson = (await res.json().catch(() => null)) as { error?: string } | null;
+        const rawErr = errJson?.error || `Anfrage fehlgeschlagen (HTTP ${res.status}).`;
+        const isRl = isRateLimitErrorPayload(res.status, rawErr);
+        if (isRl) {
+          rateLimitCooldownUntilMs = Date.now() + 25000;
+          if (attempt < MAX_RETRIES) {
+            const waitMs = parseRetryAfterMs(res.headers, rawErr, attempt);
+            params.onRetryNotice?.({ attempt: attempt + 1, waitSeconds: Math.ceil(waitMs / 1000) });
+            await abortableSleep(waitMs, params.signal);
+            params.onRetryNotice?.(null);
+            continue;
           }
-          if (typeof parsed.delta === 'string') {
-            accumulated += parsed.delta;
-            params.onDelta(accumulated);
-          }
-        } catch {
-          // Ignore malformed SSE frames
+          return { ok: false, error: formatFriendlyRateLimitMessage(rawErr), isRateLimit: true };
         }
+        return { ok: false, error: rawErr };
       }
-    }
+      if (!res.body) {
+        return { ok: false, error: 'Keine Antwort vom Server erhalten.' };
+      }
 
-    return { ok: true, text: accumulated };
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let buffer = '';
+      let accumulated = '';
+      let streamRateLimitError: string | null = null;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const frames = buffer.split('\n\n');
+        buffer = frames.pop() ?? '';
+
+        for (const frame of frames) {
+          const line = frame.trim();
+          if (!line.startsWith('data:')) continue;
+          const raw = line.slice(5).trim();
+          if (!raw) continue;
+          try {
+            const parsed = JSON.parse(raw) as { delta?: string; error?: string };
+            if (parsed.error) {
+              if (!accumulated && isRateLimitErrorPayload(0, parsed.error)) {
+                streamRateLimitError = parsed.error;
+                break;
+              }
+              return {
+                ok: false,
+                error: isRateLimitErrorPayload(0, parsed.error)
+                  ? formatFriendlyRateLimitMessage(parsed.error)
+                  : parsed.error,
+                isRateLimit: isRateLimitErrorPayload(0, parsed.error),
+              };
+            }
+            if (typeof parsed.delta === 'string') {
+              accumulated += parsed.delta;
+              params.onDelta(accumulated);
+            }
+          } catch {
+            // Ignore malformed SSE frames
+          }
+        }
+        if (streamRateLimitError) break;
+      }
+
+      if (streamRateLimitError) {
+        rateLimitCooldownUntilMs = Date.now() + 25000;
+        if (attempt < MAX_RETRIES) {
+          const waitMs = parseRetryAfterMs(res.headers, streamRateLimitError, attempt);
+          params.onRetryNotice?.({ attempt: attempt + 1, waitSeconds: Math.ceil(waitMs / 1000) });
+          await abortableSleep(waitMs, params.signal);
+          params.onRetryNotice?.(null);
+          continue;
+        }
+        return {
+          ok: false,
+          error: formatFriendlyRateLimitMessage(streamRateLimitError),
+          isRateLimit: true,
+        };
+      }
+
+      return { ok: true, text: accumulated };
+    }
   }
 
-  // Static Cloudflare Pages direct OpenRouter streaming
+  // Static Cloudflare / GitHub Pages direct OpenRouter streaming
   if (!memoryApiKey) {
     return { ok: false, error: 'Kein OpenRouter API-Schlüssel hinterlegt.' };
   }
@@ -662,93 +779,142 @@ export async function streamRewriteRequest(params: {
     ],
   };
 
-  let upstream = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-    method: 'POST',
-    signal: params.signal,
-    headers: {
-      Authorization: `Bearer ${memoryApiKey}`,
-      'Content-Type': 'application/json',
-      'HTTP-Referer': getReferer(),
-      'X-Title': 'ÜxzWrite & Translate',
-    },
-    body: JSON.stringify({ ...baseBody, reasoning: { effort: 'none' } }),
-  });
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    await paceOpenRouterCall(params.signal);
 
-  if (upstream.status === 400) {
-    const preview = await upstream.text().catch(() => '');
-    if (/reasoning|effort/i.test(preview)) {
-      upstream = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        signal: params.signal,
-        headers: {
-          Authorization: `Bearer ${memoryApiKey}`,
-          'Content-Type': 'application/json',
-          'HTTP-Referer': getReferer(),
-          'X-Title': 'ÜxzWrite & Translate',
-        },
-        body: JSON.stringify(baseBody),
-      });
-    } else {
-      let message = 'OpenRouter-Fehler (HTTP 400)';
+    let upstream = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      signal: params.signal,
+      headers: {
+        Authorization: `Bearer ${memoryApiKey}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': getReferer(),
+        'X-Title': 'ÜxzWrite & Translate',
+      },
+      body: JSON.stringify({ ...baseBody, reasoning: { effort: 'none' } }),
+    });
+
+    if (upstream.status === 400) {
+      const preview = await upstream.text().catch(() => '');
+      if (/reasoning|effort/i.test(preview)) {
+        upstream = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          signal: params.signal,
+          headers: {
+            Authorization: `Bearer ${memoryApiKey}`,
+            'Content-Type': 'application/json',
+            'HTTP-Referer': getReferer(),
+            'X-Title': 'ÜxzWrite & Translate',
+          },
+          body: JSON.stringify(baseBody),
+        });
+      } else {
+        let message = 'OpenRouter-Fehler (HTTP 400)';
+        try {
+          const parsed = JSON.parse(preview) as { error?: { message?: string } };
+          if (parsed?.error?.message) message = parsed.error.message;
+        } catch {
+          if (preview) message = `${message}: ${preview.slice(0, 240)}`;
+        }
+        return { ok: false, error: message };
+      }
+    }
+
+    if (!upstream.ok || !upstream.body) {
+      const errBody = await upstream.text().catch(() => '');
+      let message = `OpenRouter-Fehler (HTTP ${upstream.status})`;
       try {
-        const parsed = JSON.parse(preview) as { error?: { message?: string } };
+        const parsed = JSON.parse(errBody) as { error?: { message?: string } };
         if (parsed?.error?.message) message = parsed.error.message;
       } catch {
-        if (preview) message = `${message}: ${preview.slice(0, 240)}`;
+        if (errBody) message = `${message}: ${errBody.slice(0, 240)}`;
+      }
+      const isRl = isRateLimitErrorPayload(upstream.status, message) || upstream.status === 503;
+      if (isRl) {
+        rateLimitCooldownUntilMs = Date.now() + 25000;
+        if (attempt < MAX_RETRIES) {
+          const waitMs = parseRetryAfterMs(upstream.headers, message, attempt);
+          params.onRetryNotice?.({ attempt: attempt + 1, waitSeconds: Math.ceil(waitMs / 1000) });
+          await abortableSleep(waitMs, params.signal);
+          params.onRetryNotice?.(null);
+          continue;
+        }
+        return {
+          ok: false,
+          error: formatFriendlyRateLimitMessage(message),
+          isRateLimit: true,
+        };
       }
       return { ok: false, error: message };
     }
-  }
 
-  if (!upstream.ok || !upstream.body) {
-    const errBody = await upstream.text().catch(() => '');
-    let message = `OpenRouter-Fehler (HTTP ${upstream.status})`;
-    try {
-      const parsed = JSON.parse(errBody) as { error?: { message?: string } };
-      if (parsed?.error?.message) message = parsed.error.message;
-    } catch {
-      if (errBody) message = `${message}: ${errBody.slice(0, 240)}`;
-    }
-    return { ok: false, error: message };
-  }
+    const reader = upstream.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let buffer = '';
+    let accumulated = '';
+    let streamRateLimitError: string | null = null;
 
-  const reader = upstream.body.getReader();
-  const decoder = new TextDecoder('utf-8');
-  let buffer = '';
-  let accumulated = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? '';
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() ?? '';
-
-    for (const rawLine of lines) {
-      const line = rawLine.trim();
-      if (!line || !line.startsWith('data:')) continue;
-      const payload = line.slice(5).trim();
-      if (payload === '[DONE]') continue;
-      try {
-        const parsed = JSON.parse(payload) as {
-          choices?: Array<{ delta?: { content?: string } }>;
-          error?: { message?: string };
-        };
-        if (parsed.error?.message) {
-          return { ok: false, error: parsed.error.message };
+      for (const rawLine of lines) {
+        const line = rawLine.trim();
+        if (!line || !line.startsWith('data:')) continue;
+        const payload = line.slice(5).trim();
+        if (payload === '[DONE]') continue;
+        try {
+          const parsed = JSON.parse(payload) as {
+            choices?: Array<{ delta?: { content?: string } }>;
+            error?: { message?: string };
+          };
+          if (parsed.error?.message) {
+            const isRl = isRateLimitErrorPayload(0, parsed.error.message);
+            if (!accumulated && isRl) {
+              streamRateLimitError = parsed.error.message;
+              break;
+            }
+            return {
+              ok: false,
+              error: isRl ? formatFriendlyRateLimitMessage(parsed.error.message) : parsed.error.message,
+              isRateLimit: isRl,
+            };
+          }
+          const delta = parsed.choices?.[0]?.delta?.content;
+          if (typeof delta === 'string' && delta.length > 0) {
+            accumulated += delta;
+            params.onDelta(accumulated);
+          }
+        } catch {
+          // Ignore partial keepalive frames
         }
-        const delta = parsed.choices?.[0]?.delta?.content;
-        if (typeof delta === 'string' && delta.length > 0) {
-          accumulated += delta;
-          params.onDelta(accumulated);
-        }
-      } catch {
-        // Ignore partial keepalive frames
       }
+      if (streamRateLimitError) break;
     }
+
+    if (streamRateLimitError) {
+      rateLimitCooldownUntilMs = Date.now() + 25000;
+      if (attempt < MAX_RETRIES) {
+        const waitMs = parseRetryAfterMs(upstream.headers, streamRateLimitError, attempt);
+        params.onRetryNotice?.({ attempt: attempt + 1, waitSeconds: Math.ceil(waitMs / 1000) });
+        await abortableSleep(waitMs, params.signal);
+        params.onRetryNotice?.(null);
+        continue;
+      }
+      return {
+        ok: false,
+        error: formatFriendlyRateLimitMessage(streamRateLimitError),
+        isRateLimit: true,
+      };
+    }
+
+    return { ok: true, text: accumulated };
   }
 
-  return { ok: true, text: accumulated };
+  return { ok: false, error: 'Anfrage-Limit überschritten. Bitte kurz warten.', isRateLimit: true };
 }
 
 export async function fetchSentenceAlternatives(params: {
@@ -762,19 +928,40 @@ export async function fetchSentenceAlternatives(params: {
   style: WritingStyleId;
   model: string;
   preferences?: WritingPreferences;
-}): Promise<{ ok: true; alternatives: string[] } | { ok: false; error: string }> {
+}): Promise<{ ok: true; alternatives: string[] } | { ok: false; error: string; isRateLimit?: boolean }> {
   const hasBackend = await detectBackend();
+  const MAX_RETRIES = 1;
+
   if (hasBackend) {
-    const res = await fetch('./api/alternatives', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
-    });
-    const data = (await res.json()) as { alternatives?: string[]; error?: string };
-    if (!res.ok) {
-      return { ok: false, error: data.error || 'Alternativen konnten nicht geladen werden.' };
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      await paceOpenRouterCall(undefined);
+      const res = await fetch('./api/alternatives', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params),
+      });
+      const data = (await res.json().catch(() => ({}))) as { alternatives?: string[]; error?: string };
+      if (!res.ok) {
+        const rawErr = data.error || `Alternativen konnten nicht geladen werden (HTTP ${res.status}).`;
+        const isRl = isRateLimitErrorPayload(res.status, rawErr) || res.status === 503;
+        if (isRl) {
+          rateLimitCooldownUntilMs = Date.now() + 25000;
+          if (attempt < MAX_RETRIES) {
+            const waitMs = parseRetryAfterMs(res.headers, rawErr, attempt);
+            await abortableSleep(waitMs);
+            continue;
+          }
+          return {
+            ok: false,
+            error: formatFriendlyRateLimitMessage(rawErr),
+            isRateLimit: true,
+          };
+        }
+        return { ok: false, error: rawErr };
+      }
+      return { ok: true, alternatives: data.alternatives ?? [] };
     }
-    return { ok: true, alternatives: data.alternatives ?? [] };
+    return { ok: false, error: formatFriendlyRateLimitMessage('HTTP 429'), isRateLimit: true };
   }
 
   if (!memoryApiKey) {
@@ -826,60 +1013,90 @@ export async function fetchSentenceAlternatives(params: {
     ],
   };
 
-  let upstream = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${memoryApiKey}`,
-      'Content-Type': 'application/json',
-      'HTTP-Referer': getReferer(),
-      'X-Title': 'ÜxzWrite & Translate',
-    },
-    body: JSON.stringify({ ...payload, reasoning: { effort: 'none' } }),
-  });
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    await paceOpenRouterCall(undefined);
 
-  if (upstream.status === 400) {
-    const preview = await upstream.text().catch(() => '');
-    if (/reasoning|effort/i.test(preview)) {
-      upstream = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${memoryApiKey}`,
-          'Content-Type': 'application/json',
-          'HTTP-Referer': getReferer(),
-          'X-Title': 'ÜxzWrite & Translate',
-        },
-        body: JSON.stringify(payload),
-      });
+    let upstream = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${memoryApiKey}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': getReferer(),
+        'X-Title': 'ÜxzWrite & Translate',
+      },
+      body: JSON.stringify({ ...payload, reasoning: { effort: 'none' } }),
+    });
+
+    if (upstream.status === 400) {
+      const preview = await upstream.text().catch(() => '');
+      if (/reasoning|effort/i.test(preview)) {
+        upstream = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${memoryApiKey}`,
+            'Content-Type': 'application/json',
+            'HTTP-Referer': getReferer(),
+            'X-Title': 'ÜxzWrite & Translate',
+          },
+          body: JSON.stringify(payload),
+        });
+      } else {
+        return { ok: false, error: `Alternativen fehlgeschlagen (HTTP 400).` };
+      }
     }
-  }
 
-  if (!upstream.ok) {
-    return { ok: false, error: `Alternativen fehlgeschlagen (HTTP ${upstream.status}).` };
-  }
+    if (!upstream.ok) {
+      const errBody = await upstream.text().catch(() => '');
+      let message = `OpenRouter-Fehler (HTTP ${upstream.status})`;
+      try {
+        const parsed = JSON.parse(errBody) as { error?: { message?: string } };
+        if (parsed?.error?.message) message = parsed.error.message;
+      } catch {
+        if (errBody) message = `${message}: ${errBody.slice(0, 200)}`;
+      }
+      const isRl = isRateLimitErrorPayload(upstream.status, message) || upstream.status === 503;
+      if (isRl) {
+        rateLimitCooldownUntilMs = Date.now() + 25000;
+        if (attempt < MAX_RETRIES) {
+          const waitMs = parseRetryAfterMs(upstream.headers, message, attempt);
+          await abortableSleep(waitMs);
+          continue;
+        }
+        return {
+          ok: false,
+          error: formatFriendlyRateLimitMessage(message),
+          isRateLimit: true,
+        };
+      }
+      return { ok: false, error: `Alternativen fehlgeschlagen (HTTP ${upstream.status}).` };
+    }
 
-  const json = (await upstream.json()) as {
-    choices?: Array<{ message?: { content?: string } }>;
-  };
-  const raw = json.choices?.[0]?.message?.content?.trim() || '';
-  const cleaned = raw.replace(/^```json\s*/i, '').replace(/```$/i, '').trim();
+    const json = (await upstream.json()) as {
+      choices?: Array<{ message?: { content?: string } }>;
+    };
+    const raw = json.choices?.[0]?.message?.content?.trim() || '';
+    const cleaned = raw.replace(/^```json\s*/i, '').replace(/```$/i, '').trim();
 
-  let alternatives: string[] = [];
-  try {
-    const parsed = JSON.parse(cleaned) as { alternatives?: unknown };
-    if (Array.isArray(parsed.alternatives)) {
-      alternatives = parsed.alternatives
-        .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    let alternatives: string[] = [];
+    try {
+      const parsed = JSON.parse(cleaned) as { alternatives?: unknown };
+      if (Array.isArray(parsed.alternatives)) {
+        alternatives = parsed.alternatives
+          .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+          .slice(0, 3);
+      }
+    } catch {
+      alternatives = cleaned
+        .split('\n')
+        .map((l) => l.replace(/^\d+[.)]\s*/, '').replace(/^["']|["']$/g, '').trim())
+        .filter(Boolean)
         .slice(0, 3);
     }
-  } catch {
-    alternatives = cleaned
-      .split('\n')
-      .map((l) => l.replace(/^\d+[.)]\s*/, '').replace(/^["']|["']$/g, '').trim())
-      .filter(Boolean)
-      .slice(0, 3);
+
+    return { ok: true, alternatives };
   }
 
-  return { ok: true, alternatives };
+  return { ok: false, error: formatFriendlyRateLimitMessage('HTTP 429'), isRateLimit: true };
 }
 
 export async function analyzeChangesRequest(params: {
@@ -890,9 +1107,14 @@ export async function analyzeChangesRequest(params: {
   signal: AbortSignal;
 }): Promise<Array<{ id: string; category: ChangeCategory; reason?: string }>> {
   if (params.hunks.length === 0) return [];
+  const skipOnRateLimit = memoryPreferences.settings?.skipAnalyzeOnRateLimit ?? true;
+  if (skipOnRateLimit && Date.now() < rateLimitCooldownUntilMs) return [];
+
   const hasBackend = await detectBackend();
+  const analyzeSpacing = Math.max(500, memoryPreferences.settings?.minRequestSpacingMs ?? 450);
 
   if (hasBackend) {
+    await paceOpenRouterCall(params.signal, analyzeSpacing);
     const res = await fetch('./api/analyze-changes', {
       method: 'POST',
       signal: params.signal,
@@ -903,6 +1125,10 @@ export async function analyzeChangesRequest(params: {
         hunks: params.hunks,
       }),
     });
+    if (res.status === 429 || res.status === 503) {
+      rateLimitCooldownUntilMs = Date.now() + 25000;
+      return [];
+    }
     if (!res.ok) return [];
     const data = (await res.json()) as {
       classifications?: Array<{ id: string; category: ChangeCategory; reason?: string }>;
@@ -913,6 +1139,8 @@ export async function analyzeChangesRequest(params: {
   if (!memoryApiKey) return [];
   const targetModel = params.model || memoryModel;
   if (!memoryPaidUnlocked && !(await isStaticModelFree(targetModel))) return [];
+
+  await paceOpenRouterCall(params.signal, analyzeSpacing);
 
   const compactHunks = params.hunks.slice(0, 60).map((h) => ({
     id: h.id,
@@ -976,7 +1204,14 @@ export async function analyzeChangesRequest(params: {
         },
         body: JSON.stringify(payload),
       });
+    } else {
+      return [];
     }
+  }
+
+  if (upstream.status === 429 || upstream.status === 503) {
+    rateLimitCooldownUntilMs = Date.now() + 25000;
+    return [];
   }
 
   if (!upstream.ok) return [];
@@ -1090,7 +1325,13 @@ export async function fetchWritingPreferences(): Promise<WritingPreferences> {
   if (hasBackend) {
     const res = await fetch('./api/preferences');
     if (res.ok) {
-      return (await res.json()) as WritingPreferences;
+      const loaded = (await res.json()) as WritingPreferences;
+      const merged: WritingPreferences = {
+        ...loaded,
+        settings: { ...DEFAULT_WORKSPACE_SETTINGS, ...(loaded.settings || {}) },
+      };
+      memoryPreferences = merged;
+      return merged;
     }
   }
   return memoryPreferences;

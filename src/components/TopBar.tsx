@@ -4,7 +4,7 @@ import logoDark from '../assets/logo-dark.png';
 import logoLight from '../assets/logo-light.png';
 import type { OpenRouterStatus } from '../types';
 
-export type ActiveTab = 'editor' | 'translate' | 'rules' | 'history' | 'models';
+export type ActiveTab = 'editor' | 'translate' | 'rules' | 'history' | 'models' | 'privacy';
 
 interface TopBarProps {
   activeTab: ActiveTab;

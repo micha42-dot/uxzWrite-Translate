@@ -4,6 +4,7 @@ import { ModelsView } from './components/ModelsView';
 import { OpenRouterDrawer } from './components/OpenRouterDrawer';
 import { PaidModelsPasswordModal } from './components/PaidModelsPasswordModal';
 import { PreferencesView } from './components/PreferencesView';
+import { PrivacyView } from './components/PrivacyView';
 import { SettingsModal } from './components/SettingsModal';
 import { TopBar } from './components/TopBar';
 import type { ActiveTab } from './components/TopBar';
@@ -37,7 +38,12 @@ import type {
 } from './types';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<ActiveTab>('editor');
+  const [activeTab, setActiveTab] = useState<ActiveTab>(() => {
+    if (typeof window !== 'undefined' && window.location.hash === '#datenschutz') {
+      return 'privacy';
+    }
+    return 'editor';
+  });
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [workspaceSettingsOpen, setWorkspaceSettingsOpen] = useState(false);
   const [unlockModalOpen, setUnlockModalOpen] = useState(false);
@@ -88,6 +94,32 @@ export default function App() {
   useEffect(() => {
     document.documentElement.classList.toggle('dark', darkMode);
   }, [darkMode]);
+
+  useEffect(() => {
+    const onHashChange = () => {
+      if (window.location.hash === '#datenschutz') {
+        setActiveTab('privacy');
+      } else if (activeTab === 'privacy' && window.location.hash !== '#datenschutz') {
+        setActiveTab('editor');
+      }
+    };
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, [activeTab]);
+
+  function handleSelectTab(tab: ActiveTab) {
+    setActiveTab(tab);
+    if (typeof window !== 'undefined') {
+      if (tab === 'privacy') {
+        if (window.location.hash !== '#datenschutz') {
+          window.history.pushState(null, '', '#datenschutz');
+        }
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      } else if (window.location.hash === '#datenschutz') {
+        window.history.pushState(null, '', window.location.pathname + window.location.search);
+      }
+    }
+  }
 
   const fetchStatusAndHistory = useCallback(async () => {
     try {
@@ -235,10 +267,10 @@ export default function App() {
     preferences.rules.filter((r) => r.enabled).length;
 
   return (
-    <div className="min-h-screen bg-[#F8F9FA] dark:bg-[#090C12] bg-grid-pattern text-neutral-900 dark:text-neutral-100 transition-colors">
+    <div className="min-h-screen flex flex-col bg-[#F8F9FA] dark:bg-[#090C12] bg-grid-pattern text-neutral-900 dark:text-neutral-100 transition-colors">
       <TopBar
         activeTab={activeTab}
-        onSelectTab={setActiveTab}
+        onSelectTab={handleSelectTab}
         historyCount={history.length}
         rulesCount={activePreferencesCount}
         status={status}
@@ -248,7 +280,7 @@ export default function App() {
         onOpenWorkspaceSettings={() => setWorkspaceSettingsOpen(true)}
       />
 
-      <main>
+      <main className="flex-1">
         {activeTab === 'editor' && (
           <WriteWorkspace
             status={status}
@@ -269,6 +301,7 @@ export default function App() {
             onChangeChanges={setChanges}
             onOpenSettings={() => setSettingsOpen(true)}
             onRequestUnlock={() => handleRequestUnlock()}
+            onSelectModel={handleSelectModel}
             onSaveHistory={handleSaveHistory}
           />
         )}
@@ -293,6 +326,7 @@ export default function App() {
             onChangeChanges={setTranslateChanges}
             onOpenSettings={() => setSettingsOpen(true)}
             onRequestUnlock={() => handleRequestUnlock()}
+            onSelectModel={handleSelectModel}
             onSaveHistory={handleSaveHistory}
           />
         )}
@@ -326,7 +360,43 @@ export default function App() {
             onLockPaid={handleLockPaid}
           />
         )}
+
+        {activeTab === 'privacy' && (
+          <PrivacyView
+            onBackToEditor={() => handleSelectTab('editor')}
+            onOpenSettings={() => setSettingsOpen(true)}
+          />
+        )}
       </main>
+
+      <footer className="border-t border-neutral-200/80 dark:border-neutral-800/80 bg-white/80 dark:bg-[#0A0D14]/80 backdrop-blur-sm">
+        <div className="max-w-[1440px] mx-auto px-4 sm:px-6 py-2.5 flex flex-wrap items-center justify-between gap-3 text-[11.5px] leading-snug text-neutral-500 dark:text-neutral-400">
+          <span>
+            Kein eigenes Tracking – alle Einstellungen &amp; Keys bleiben lokal im Browser.
+          </span>
+          <div className="flex items-center gap-4 shrink-0">
+            <button
+              type="button"
+              onClick={() => handleSelectTab('privacy')}
+              className={`font-medium underline underline-offset-4 transition-colors whitespace-nowrap cursor-pointer ${
+                activeTab === 'privacy'
+                  ? 'text-neutral-950 dark:text-white'
+                  : 'text-neutral-700 dark:text-neutral-300 hover:text-neutral-950 dark:hover:text-white'
+              }`}
+            >
+              Datenschutz &amp; Datenflüsse
+            </button>
+            <a
+              href="https://michaelfoertsch.de/impressum.html"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-medium text-neutral-700 dark:text-neutral-300 hover:text-neutral-950 dark:hover:text-white underline underline-offset-4 transition-colors whitespace-nowrap"
+            >
+              Impressum
+            </a>
+          </div>
+        </div>
+      </footer>
 
       <OpenRouterDrawer
         open={settingsOpen}

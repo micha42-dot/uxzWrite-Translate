@@ -17,7 +17,7 @@ import { fetchSentenceAlternatives, streamRewriteRequest } from '../lib/apiClien
 import { TRANSLATION_TONE_INSTRUCTIONS } from '../lib/prompts';
 import { computeWordDiff, countTextStats, splitIntoParagraphChunks, splitIntoSentenceSpans } from '../lib/diff';
 import type { SentenceSpan } from '../lib/diff';
-import { TRANSLATABLE_LANGUAGES } from '../types';
+import { DEFAULT_WORKSPACE_SETTINGS, TRANSLATABLE_LANGUAGES } from '../types';
 import type {
   ChangeItem,
   OpenRouterStatus,
@@ -48,6 +48,7 @@ interface TranslateWorkspaceProps {
   onChangeChanges: (val: ChangeItem[]) => void;
   onOpenSettings: () => void;
   onRequestUnlock: () => void;
+  onSelectModel?: (modelId: string) => Promise<void>;
   onSaveHistory: (entry: {
     sourceText: string;
     refinedText: string;
@@ -81,6 +82,7 @@ export function TranslateWorkspace({
   onChangeTone,
   onChangeChanges,
   onOpenSettings,
+  onSelectModel,
   onSaveHistory,
 }: TranslateWorkspaceProps) {
   const [outputView, setOutputView] = useState<OutputViewMode>('clean');
@@ -90,7 +92,9 @@ export function TranslateWorkspace({
 
   const [isStreaming, setIsStreaming] = useState(false);
   const [activeRunModel, setActiveRunModel] = useState<string | null>(null);
+  const [rateLimitNotice, setRateLimitNotice] = useState<{ attempt: number; waitSeconds: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isRateLimitError, setIsRateLimitError] = useState(false);
   const [copied, setCopied] = useState(false);
   const [savedFlag, setSavedFlag] = useState(false);
 
@@ -169,13 +173,18 @@ export function TranslateWorkspace({
 
       setIsStreaming(true);
       setActiveRunModel(status.model);
+      setRateLimitNotice(null);
       setError(null);
+      setIsRateLimitError(false);
       setSelectedSentence(null);
       setAlternatives([]);
       onChangeChanges([]);
 
       try {
-        const chunks = chunkingEnabled ? splitIntoParagraphChunks(textToProcess) : [];
+        const wsSettings = preferences.settings ?? DEFAULT_WORKSPACE_SETTINGS;
+        const chunks = chunkingEnabled
+          ? splitIntoParagraphChunks(textToProcess, wsSettings.chunkMaxChars)
+          : [];
         let finalTranslation = '';
 
         if (chunks.length >= 2) {
@@ -193,7 +202,12 @@ export function TranslateWorkspace({
 
           let nextIdx = 0;
           let chunkErr: string | null = null;
-          const workers = Math.min(4, chunks.length);
+          let chunkIsRateLimit = false;
+          const isFreeModel = status.model === 'openrouter/free' || status.model.endsWith(':free');
+          const desiredWorkers = isFreeModel
+            ? wsSettings.freeModelConcurrency
+            : wsSettings.paidModelConcurrency;
+          const workers = Math.min(Math.max(1, desiredWorkers), chunks.length);
 
           const worker = async () => {
             while (nextIdx < chunks.length) {
@@ -214,13 +228,16 @@ export function TranslateWorkspace({
                 previousContext,
                 preferences,
                 signal: controller.signal,
+                onRetryNotice: setRateLimitNotice,
                 onDelta: (acc) => {
+                  setRateLimitNotice(null);
                   outputs[idx] = acc;
                   onChangeTranslatedText(assemble());
                 },
               });
               if (!res.ok) {
                 chunkErr = res.error;
+                chunkIsRateLimit = Boolean(res.isRateLimit);
                 controller.abort();
                 return;
               }
@@ -233,6 +250,8 @@ export function TranslateWorkspace({
 
           if (chunkErr) {
             setError(chunkErr);
+            setIsRateLimitError(chunkIsRateLimit);
+            setRateLimitNotice(null);
             setIsStreaming(false);
             setActiveRunModel(null);
             return;
@@ -251,11 +270,17 @@ export function TranslateWorkspace({
             model: status.model,
             preferences,
             signal: controller.signal,
-            onDelta: (acc) => onChangeTranslatedText(acc),
+            onRetryNotice: setRateLimitNotice,
+            onDelta: (acc) => {
+              setRateLimitNotice(null);
+              onChangeTranslatedText(acc);
+            },
           });
 
           if (!res.ok) {
             setError(res.error);
+            setIsRateLimitError(Boolean(res.isRateLimit));
+            setRateLimitNotice(null);
             setIsStreaming(false);
             setActiveRunModel(null);
             return;
@@ -280,7 +305,9 @@ export function TranslateWorkspace({
             model: reviewModel,
             preferences,
             signal: controller.signal,
+            onRetryNotice: setRateLimitNotice,
             onDelta: (acc) => {
+              setRateLimitNotice(null);
               if (acc) onChangeTranslatedText(acc);
             },
           });
@@ -291,11 +318,14 @@ export function TranslateWorkspace({
           }
         }
 
+        setRateLimitNotice(null);
         setIsStreaming(false);
         setActiveRunModel(null);
       } catch (err) {
         if ((err as Error)?.name === 'AbortError') return;
         setError(err instanceof Error ? err.message : 'Übersetzungsfehler.');
+        setIsRateLimitError(false);
+        setRateLimitNotice(null);
         setIsStreaming(false);
         setActiveRunModel(null);
       }
@@ -324,7 +354,8 @@ export function TranslateWorkspace({
     const signature = `${sourceLang}|${targetLang}|${tone}|${status.model}|${preferencesSignature}|${sourceText}`;
     if (signature === lastSignatureRef.current) return;
 
-    const delay = pasteTriggeredRef.current ? 60 : 420;
+    const wsSettings = preferences.settings ?? DEFAULT_WORKSPACE_SETTINGS;
+    const delay = pasteTriggeredRef.current ? wsSettings.pasteDebounceMs : wsSettings.typingDebounceMs;
     pasteTriggeredRef.current = false;
 
     const timer = window.setTimeout(() => {
@@ -339,6 +370,7 @@ export function TranslateWorkspace({
     tone,
     status.configured,
     status.model,
+    preferences.settings,
     preferencesSignature,
     instantMode,
     runTranslate,
@@ -350,6 +382,7 @@ export function TranslateWorkspace({
       abortRef.current.abort();
       abortRef.current = null;
     }
+    setRateLimitNotice(null);
     setIsStreaming(false);
     setActiveRunModel(null);
   }
@@ -372,6 +405,7 @@ export function TranslateWorkspace({
     onChangeSourceText('');
     onChangeTranslatedText('');
     setError(null);
+    setIsRateLimitError(false);
     setSelectedSentence(null);
     setAlternatives([]);
     lastSignatureRef.current = '';
@@ -581,7 +615,7 @@ export function TranslateWorkspace({
       </div>
 
       {/* Main Two-Column Editor */}
-      <div className="border border-neutral-300/90 dark:border-neutral-800 rounded-lg bg-white dark:bg-[#0C1019] shadow-sm overflow-hidden grid grid-cols-1 lg:grid-cols-2 lg:divide-x lg:divide-neutral-300/90 dark:lg:divide-neutral-800 min-h-[540px] lg:h-[calc(100vh-188px)]">
+      <div className="border border-neutral-300/90 dark:border-neutral-800 rounded-lg bg-white dark:bg-[#0C1019] shadow-sm overflow-hidden grid grid-cols-1 lg:grid-cols-2 lg:divide-x lg:divide-neutral-300/90 dark:lg:divide-neutral-800 min-h-[480px] lg:h-[calc(100vh-232px)]">
         {/* Left Column: Source */}
         <section className="flex flex-col min-h-[320px] lg:min-h-0 bg-[#FAFAFA] dark:bg-[#080B10]">
           <div className="h-12 px-5 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between gap-3 shrink-0">
@@ -694,9 +728,13 @@ export function TranslateWorkspace({
 
             <div className="flex items-center gap-2.5 text-xs text-slate-500 dark:text-slate-400 min-w-0">
               {isStreaming ? (
-                <span className="inline-flex items-center gap-1.5 text-blue-700 dark:text-blue-400 font-medium">
+                <span className="inline-flex items-center gap-1.5 text-blue-700 dark:text-blue-400 font-medium min-w-0">
                   <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
-                  <span className="truncate font-mono">{activeRunModel || status.model}</span>
+                  <span className="truncate max-w-[260px] font-mono">
+                    {rateLimitNotice
+                      ? `Rate-Limit · Neuversuch (${rateLimitNotice.attempt}) in ${rateLimitNotice.waitSeconds} s…`
+                      : activeRunModel || status.model}
+                  </span>
                 </span>
               ) : (
                 status.configured && (
@@ -722,15 +760,46 @@ export function TranslateWorkspace({
                 </button>
               </div>
             ) : error ? (
-              <div className="p-4 rounded-lg border border-rose-200 bg-rose-50 text-xs text-rose-900 space-y-2">
-                <p>{error}</p>
-                <button
-                  type="button"
-                  onClick={() => runTranslate(sourceText, sourceLang, targetLang, tone)}
-                  className="px-3 py-1.5 text-xs font-medium rounded-md bg-rose-700 text-white cursor-pointer"
-                >
-                  Erneut versuchen
-                </button>
+              <div className="p-4 rounded-lg border border-rose-200 dark:border-rose-900/70 bg-rose-50 dark:bg-rose-950/35 text-xs text-rose-900 dark:text-rose-200 space-y-3">
+                <p className="text-sm">{error}</p>
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => runTranslate(sourceText, sourceLang, targetLang, tone)}
+                    className="px-3 py-1.5 text-xs font-medium rounded-md bg-rose-700 text-white hover:bg-rose-800 cursor-pointer"
+                  >
+                    Erneut versuchen
+                  </button>
+                  {isRateLimitError && status.model !== 'openrouter/free' && onSelectModel && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        setError(null);
+                        setIsRateLimitError(false);
+                        await onSelectModel('openrouter/free');
+                      }}
+                      className="px-3 py-1.5 text-xs font-medium rounded-md border border-rose-300 dark:border-rose-800 text-rose-800 dark:text-rose-200 hover:bg-rose-100 dark:hover:bg-rose-950/60 cursor-pointer"
+                    >
+                      Free Models Router nutzen
+                    </button>
+                  )}
+                  {isRateLimitError && instantMode && (
+                    <button
+                      type="button"
+                      onClick={() => setInstantMode(false)}
+                      className="px-3 py-1.5 text-xs font-medium rounded-md border border-rose-300 dark:border-rose-800 text-rose-800 dark:text-rose-200 hover:bg-rose-100 dark:hover:bg-rose-950/60 cursor-pointer"
+                    >
+                      Sofort-Modus deaktivieren
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={onOpenSettings}
+                    className="text-xs font-medium text-rose-800 dark:text-rose-300 hover:underline cursor-pointer"
+                  >
+                    OpenRouter prüfen
+                  </button>
+                </div>
               </div>
             ) : !translatedText && !isStreaming ? (
               <div className="h-full flex items-center justify-center text-sm text-slate-400">
