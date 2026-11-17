@@ -235,7 +235,7 @@ export default function App() {
     preferences.rules.filter((r) => r.enabled).length;
 
   return (
-    <div className="min-h-screen bg-[#F3F5F8] dark:bg-[#080A0F] bg-[radial-gradient(ellipse_80%_45%_at_50%_-10%,rgba(29,78,216,0.06),transparent)] dark:bg-[radial-gradient(ellipse_80%_45%_at_50%_-10%,rgba(59,130,246,0.09),transparent)] text-slate-900 dark:text-slate-100 transition-colors">
+    <div className="min-h-screen bg-[#F8F9FA] dark:bg-[#090C12] bg-grid-pattern text-neutral-900 dark:text-neutral-100 transition-colors">
       <TopBar
         activeTab={activeTab}
         onSelectTab={setActiveTab}

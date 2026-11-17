@@ -8,10 +8,8 @@ import {
   Copy,
   Languages,
   Loader2,
-  Moon,
   Sparkles,
   Square,
-  Sun,
   Trash2,
   X,
 } from 'lucide-react';
@@ -460,7 +458,7 @@ export function TranslateWorkspace({
         <div className="flex flex-wrap items-center gap-2.5">
           {/* Target Language Bar */}
           <div
-            className="inline-flex items-center p-1 rounded-xl bg-white/90 dark:bg-[#0E131D] border border-slate-200/90 dark:border-slate-800 shadow-2xs overflow-x-auto no-scrollbar max-w-full"
+            className="inline-flex items-center p-0.5 rounded-md bg-white dark:bg-[#0A0D14] border border-neutral-300 dark:border-neutral-800 shadow-2xs overflow-x-auto no-scrollbar max-w-full"
             role="group"
             aria-label="Zielsprache"
           >
@@ -471,15 +469,15 @@ export function TranslateWorkspace({
                   key={lang.id}
                   type="button"
                   onClick={() => onChangeTargetLang(lang.id)}
-                  className={`relative px-2.5 py-1.5 text-xs font-medium rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                    active ? 'text-white' : 'text-slate-600 dark:text-slate-400 hover:text-slate-950 dark:hover:text-slate-100'
+                  className={`relative px-2.5 py-1.5 text-xs font-medium rounded-sm transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                    active ? 'text-white dark:text-neutral-950 font-semibold' : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-950 dark:hover:text-neutral-100'
                   }`}
                 >
                   {active && (
                     <motion.span
                       layoutId="translate-lang-pill"
                       transition={{ duration: 0.16, ease: [0.16, 1, 0.3, 1] }}
-                      className="absolute inset-0 rounded-lg bg-blue-700 dark:bg-blue-600 shadow-xs"
+                      className="absolute inset-0 rounded-sm bg-neutral-950 dark:bg-white shadow-xs"
                     />
                   )}
                   <span className="relative z-10">{lang.label}</span>
@@ -494,7 +492,7 @@ export function TranslateWorkspace({
               type="button"
               onClick={() => setToneMenuOpen((v) => !v)}
               aria-expanded={toneMenuOpen}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-xl bg-white/90 dark:bg-[#0E131D] border border-slate-200/90 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:text-slate-950 shadow-2xs cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-white dark:bg-[#0A0D14] border border-neutral-300 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300 hover:text-neutral-950 hover:border-neutral-900 dark:hover:border-neutral-100 shadow-2xs cursor-pointer"
             >
               <span>Ton: {toneLabels[tone]}</span>
             </button>
@@ -506,7 +504,7 @@ export function TranslateWorkspace({
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   exit={{ opacity: 0, y: 4, scale: 0.98 }}
                   transition={{ duration: 0.15 }}
-                  className="absolute left-0 top-full mt-1.5 z-50 w-52 p-1.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#0E131D] shadow-xl space-y-1"
+                  className="absolute left-0 top-full mt-1.5 z-50 w-52 p-1 rounded-md border border-neutral-300 dark:border-neutral-800 bg-white dark:bg-[#0A0D14] shadow-xl space-y-0.5"
                 >
                   {(['neutral', 'formal', 'informal'] as TranslationTone[]).map((t) => (
                     <button
@@ -516,10 +514,10 @@ export function TranslateWorkspace({
                         onChangeTone(t);
                         setToneMenuOpen(false);
                       }}
-                      className={`w-full px-3 py-2 text-left text-xs font-medium rounded-lg transition-colors cursor-pointer ${
+                      className={`w-full px-3 py-1.5 text-left text-xs font-medium rounded-sm transition-colors cursor-pointer ${
                         tone === t
-                          ? 'bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-400'
-                          : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                          ? 'bg-neutral-950 dark:bg-white text-white dark:text-neutral-950 font-semibold'
+                          : 'text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800'
                       }`}
                     >
                       {toneLabels[t]}
@@ -536,10 +534,10 @@ export function TranslateWorkspace({
             type="button"
             onClick={() => setChunkingEnabled((v) => !v)}
             aria-pressed={chunkingEnabled}
-            className={`px-3 py-2 text-xs font-medium rounded-xl border transition-all duration-150 whitespace-nowrap shrink-0 cursor-pointer ${
+            className={`px-3 py-1.5 text-xs font-medium rounded-md border transition-all duration-150 whitespace-nowrap shrink-0 cursor-pointer ${
               chunkingEnabled
-                ? 'border-slate-200/90 dark:border-slate-800 bg-white/90 dark:bg-[#0E131D] text-slate-900 dark:text-slate-100 shadow-2xs'
-                : 'border-slate-200/70 dark:border-slate-800/70 bg-transparent text-slate-500 dark:text-slate-400'
+                ? 'border-neutral-300 dark:border-neutral-700 bg-white dark:bg-[#0A0D14] text-neutral-950 dark:text-white shadow-2xs font-semibold'
+                : 'border-neutral-200 dark:border-neutral-800 bg-transparent text-neutral-500 dark:text-neutral-400'
             }`}
           >
             Absatz-Chunking {chunkingEnabled ? 'an' : 'aus'}
@@ -549,29 +547,20 @@ export function TranslateWorkspace({
             type="button"
             onClick={() => setInstantMode((v) => !v)}
             aria-pressed={instantMode}
-            className={`px-3 py-2 text-xs font-medium rounded-xl border transition-all duration-150 whitespace-nowrap shrink-0 cursor-pointer ${
+            className={`px-3 py-1.5 text-xs font-medium rounded-md border transition-all duration-150 whitespace-nowrap shrink-0 cursor-pointer ${
               instantMode
-                ? 'border-slate-200/90 dark:border-slate-800 bg-white/90 dark:bg-[#0E131D] text-slate-900 dark:text-slate-100 shadow-2xs'
-                : 'border-slate-200/70 dark:border-slate-800/70 bg-transparent text-slate-500 dark:text-slate-400'
+                ? 'border-neutral-300 dark:border-neutral-700 bg-white dark:bg-[#0A0D14] text-neutral-950 dark:text-white shadow-2xs font-semibold'
+                : 'border-neutral-200 dark:border-neutral-800 bg-transparent text-neutral-500 dark:text-neutral-400'
             }`}
           >
             Sofort-Modus {instantMode ? 'an' : 'aus'}
-          </button>
-
-          <button
-            type="button"
-            onClick={onToggleDarkMode}
-            aria-label={darkMode ? 'Helles Design' : 'Dunkles Design'}
-            className="p-2 rounded-xl border border-slate-200/90 dark:border-slate-800 bg-white/90 dark:bg-[#0E131D] text-slate-600 dark:text-slate-300 hover:text-slate-950 dark:hover:text-white shadow-2xs transition-colors cursor-pointer"
-          >
-            {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
           </button>
 
           {isStreaming ? (
             <button
               type="button"
               onClick={handleStop}
-              className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium rounded-xl bg-slate-950 dark:bg-white text-white dark:text-slate-950 hover:opacity-90 active:scale-[0.98] transition-all duration-150 whitespace-nowrap shrink-0 cursor-pointer shadow-xs"
+              className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-md bg-rose-600 text-white hover:bg-rose-700 active:scale-[0.98] transition-all whitespace-nowrap shrink-0 cursor-pointer shadow-xs"
             >
               <Square className="w-3 h-3 fill-current" />
               Stoppen
@@ -581,20 +570,21 @@ export function TranslateWorkspace({
               type="button"
               disabled={!sourceText.trim() || !status.configured}
               onClick={() => runTranslate(sourceText, sourceLang, targetLang, tone)}
-              className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium rounded-xl bg-blue-700 dark:bg-blue-600 text-white hover:bg-blue-800 dark:hover:bg-blue-500 active:scale-[0.98] disabled:opacity-45 disabled:cursor-not-allowed transition-all duration-150 whitespace-nowrap shrink-0 cursor-pointer shadow-xs"
+              className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-md bg-neutral-950 dark:bg-white text-white dark:text-neutral-950 hover:bg-neutral-800 dark:hover:bg-neutral-100 border border-neutral-950 dark:border-white active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed transition-all whitespace-nowrap shrink-0 cursor-pointer shadow-xs"
             >
               <Sparkles className="w-3.5 h-3.5" />
-              Übersetzen
+              <span>Übersetzen</span>
+              <span className="font-mono opacity-60 text-[10.5px] ml-0.5 tracking-tight">[⌘↵]</span>
             </button>
           )}
         </div>
       </div>
 
       {/* Main Two-Column Editor */}
-      <div className="border border-slate-200/90 dark:border-slate-800 rounded-2xl bg-white dark:bg-[#101623] shadow-[0_1px_2px_rgba(15,23,42,0.04),0_18px_42px_-18px_rgba(15,23,42,0.1)] dark:shadow-[0_1px_2px_rgba(0,0,0,0.45),0_22px_50px_-20px_rgba(0,0,0,0.7)] overflow-hidden grid grid-cols-1 lg:grid-cols-2 lg:divide-x lg:divide-slate-200/90 dark:lg:divide-slate-800 min-h-[540px] lg:h-[calc(100vh-188px)]">
+      <div className="border border-neutral-300/90 dark:border-neutral-800 rounded-lg bg-white dark:bg-[#0C1019] shadow-sm overflow-hidden grid grid-cols-1 lg:grid-cols-2 lg:divide-x lg:divide-neutral-300/90 dark:lg:divide-neutral-800 min-h-[540px] lg:h-[calc(100vh-188px)]">
         {/* Left Column: Source */}
-        <section className="flex flex-col min-h-[320px] lg:min-h-0 bg-[#FAFBFD] dark:bg-[#0B0F17]">
-          <div className="h-12 px-5 border-b border-slate-200/80 dark:border-slate-800/90 flex items-center justify-between gap-3 shrink-0">
+        <section className="flex flex-col min-h-[320px] lg:min-h-0 bg-[#FAFAFA] dark:bg-[#080B10]">
+          <div className="h-12 px-5 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between gap-3 shrink-0">
             <select
               value={sourceLang}
               onChange={(e) => onChangeSourceLang(e.target.value as SourceLanguageId)}

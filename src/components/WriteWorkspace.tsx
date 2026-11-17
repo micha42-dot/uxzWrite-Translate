@@ -12,11 +12,9 @@ import {
   Copy,
   KeyRound,
   Loader2,
-  Moon,
   RotateCcw,
   Sparkles,
   Square,
-  Sun,
   Trash2,
   X,
 } from 'lucide-react';
@@ -786,7 +784,7 @@ export function WriteWorkspace({
         <div className="flex flex-wrap items-center gap-2.5">
           {/* Mode Segmented Control */}
           <div
-            className="inline-flex items-center p-1 rounded-xl bg-white/90 dark:bg-[#0E131D] border border-slate-200/90 dark:border-slate-800 shadow-2xs"
+            className="inline-flex items-center p-0.5 rounded-md bg-white dark:bg-[#0A0D14] border border-neutral-300 dark:border-neutral-800 shadow-2xs"
             role="group"
             aria-label="Bearbeitungsmodus"
           >
@@ -806,17 +804,17 @@ export function WriteWorkspace({
                       setStyleRailOpen(false);
                     }
                   }}
-                  className={`relative px-3 py-1.5 text-xs font-medium rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                  className={`relative px-3 py-1.5 text-xs font-medium rounded-sm transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                     active
-                      ? 'text-slate-950 dark:text-white'
-                      : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                      ? 'text-white dark:text-neutral-950 font-semibold'
+                      : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-950 dark:hover:text-neutral-200'
                   }`}
                 >
                   {active && (
                     <motion.span
                       layoutId="workspace-mode-pill"
                       transition={{ duration: 0.16, ease: [0.16, 1, 0.3, 1] }}
-                      className="absolute inset-0 rounded-lg bg-slate-100 dark:bg-slate-800"
+                      className="absolute inset-0 rounded-sm bg-neutral-950 dark:bg-white shadow-xs"
                     />
                   )}
                   <span className="relative z-10">{item.label}</span>
@@ -828,7 +826,7 @@ export function WriteWorkspace({
           {/* Animated Collapsible Style Rail */}
           <div
             ref={styleRailRef}
-            className="inline-flex items-center p-1 rounded-xl bg-white/90 dark:bg-[#0E131D] border border-slate-200/90 dark:border-slate-800 shadow-2xs overflow-x-auto no-scrollbar max-w-full"
+            className="inline-flex items-center p-0.5 rounded-md bg-white dark:bg-[#0A0D14] border border-neutral-300 dark:border-neutral-800 shadow-2xs overflow-x-auto no-scrollbar max-w-full"
             role="group"
             aria-label="Schreibstil"
           >
@@ -841,10 +839,10 @@ export function WriteWorkspace({
                 setStyleRailOpen((v) => !v);
               }}
               aria-expanded={styleRailOpen}
-              className={`relative inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+              className={`relative inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-sm transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                 mode === 'style'
-                  ? 'bg-blue-700 dark:bg-blue-600 text-white shadow-xs'
-                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-950 dark:hover:text-slate-200'
+                  ? 'bg-neutral-950 dark:bg-white text-white dark:text-neutral-950 font-semibold shadow-xs'
+                  : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 hover:text-neutral-950 dark:hover:text-neutral-200'
               }`}
             >
               <span>{activeStyleObj.label}</span>
@@ -862,20 +860,20 @@ export function WriteWorkspace({
                   initial={{ opacity: 0, width: 0 }}
                   animate={{ opacity: 1, width: 'auto' }}
                   exit={{ opacity: 0, width: 0 }}
-                  transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+                  transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
                   className="flex items-center overflow-hidden"
                 >
-                  <div className="flex items-center gap-0.5 pl-1">
+                  <div className="flex items-center gap-1 pl-1">
                     {otherStyles.map((s, idx) => (
                       <motion.button
                         key={s.id}
                         type="button"
-                        initial={{ opacity: 0, x: -16, scale: 0.9 }}
+                        initial={{ opacity: 0, x: -12, scale: 0.95 }}
                         animate={{ opacity: 1, x: 0, scale: 1 }}
-                        exit={{ opacity: 0, x: -10, scale: 0.92 }}
+                        exit={{ opacity: 0, x: -8, scale: 0.95 }}
                         transition={{
-                          duration: 0.18,
-                          delay: idx * 0.025,
+                          duration: 0.16,
+                          delay: idx * 0.02,
                           ease: [0.16, 1, 0.3, 1],
                         }}
                         onClick={() => {
@@ -883,7 +881,7 @@ export function WriteWorkspace({
                           if (mode !== 'style') onChangeMode('style');
                           setStyleRailOpen(false);
                         }}
-                        className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-slate-600 dark:text-slate-400 hover:text-slate-950 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800/80 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                        className="px-2.5 py-1.5 text-xs font-medium rounded-sm text-neutral-600 dark:text-neutral-400 hover:text-neutral-950 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
                       >
                         {s.label}
                       </motion.button>
@@ -900,10 +898,10 @@ export function WriteWorkspace({
             type="button"
             onClick={() => setChunkingEnabled((v) => !v)}
             aria-pressed={chunkingEnabled}
-            className={`px-3 py-2 text-xs font-medium rounded-xl border transition-all duration-150 whitespace-nowrap shrink-0 cursor-pointer ${
+            className={`px-3 py-1.5 text-xs font-medium rounded-md border transition-all duration-150 whitespace-nowrap shrink-0 cursor-pointer ${
               chunkingEnabled
-                ? 'border-slate-200/90 dark:border-slate-800 bg-white/90 dark:bg-[#0E131D] text-slate-900 dark:text-slate-100 shadow-2xs'
-                : 'border-slate-200/70 dark:border-slate-800/70 bg-transparent text-slate-500 dark:text-slate-400'
+                ? 'border-neutral-300 dark:border-neutral-700 bg-white dark:bg-[#0A0D14] text-neutral-950 dark:text-white shadow-2xs font-semibold'
+                : 'border-neutral-200 dark:border-neutral-800 bg-transparent text-neutral-500 dark:text-neutral-400'
             }`}
           >
             Absatz-Chunking {chunkingEnabled ? 'an' : 'aus'}
@@ -914,10 +912,10 @@ export function WriteWorkspace({
               type="button"
               onClick={() => setInstantMode((v) => !v)}
               aria-pressed={instantMode}
-              className={`px-3 py-2 text-xs font-medium rounded-xl border transition-all duration-150 whitespace-nowrap shrink-0 cursor-pointer ${
+              className={`px-3 py-1.5 text-xs font-medium rounded-md border transition-all duration-150 whitespace-nowrap shrink-0 cursor-pointer ${
                 instantMode
-                  ? 'border-slate-200/90 dark:border-slate-800 bg-white/90 dark:bg-[#0E131D] text-slate-900 dark:text-slate-100 shadow-2xs'
-                  : 'border-slate-200/70 dark:border-slate-800/70 bg-transparent text-slate-500 dark:text-slate-400'
+                  ? 'border-neutral-300 dark:border-neutral-700 bg-white dark:bg-[#0A0D14] text-neutral-950 dark:text-white shadow-2xs font-semibold'
+                  : 'border-neutral-200 dark:border-neutral-800 bg-transparent text-neutral-500 dark:text-neutral-400'
               }`}
             >
               Sofort-Modus {instantMode ? 'an' : 'aus'}
@@ -934,10 +932,10 @@ export function WriteWorkspace({
               }}
               aria-expanded={instantInfoOpen}
               aria-label="Info zum Sofort-Modus"
-              className={`p-2 rounded-xl border transition-colors cursor-pointer ${
+              className={`p-1.5 rounded-md border transition-colors cursor-pointer ${
                 instantInfoOpen
-                  ? 'border-blue-600/40 bg-blue-50/80 dark:bg-blue-950/40 text-blue-700 dark:text-blue-400'
-                  : 'border-slate-200/90 dark:border-slate-800 bg-white/90 dark:bg-[#0E131D] text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 shadow-2xs'
+                  ? 'border-neutral-950 dark:border-white bg-neutral-950 dark:bg-white text-white dark:text-neutral-950'
+                  : 'border-neutral-300 dark:border-neutral-800 bg-white dark:bg-[#0A0D14] text-neutral-500 dark:text-neutral-400 hover:text-neutral-950 dark:hover:text-neutral-100 shadow-2xs'
               }`}
             >
               <AlertCircle className="w-4 h-4" />
@@ -958,30 +956,30 @@ export function WriteWorkspace({
                     left: instantPopoverPos.left,
                     width: instantPopoverPos.width,
                   }}
-                  className="fixed z-50 max-w-[calc(100vw-24px)] p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#0E131D] shadow-xl space-y-3"
+                  className="fixed z-50 max-w-[calc(100vw-24px)] p-4 rounded-lg border border-neutral-300 dark:border-neutral-800 bg-white dark:bg-[#0A0D14] shadow-xl space-y-3"
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs font-semibold text-slate-950 dark:text-white">
+                    <span className="text-xs font-semibold text-neutral-950 dark:text-white">
                       Sofort-Modus
                     </span>
                     <button
                       type="button"
                       onClick={() => setInstantInfoOpen(false)}
                       aria-label="Info schließen"
-                      className="p-0.5 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 cursor-pointer"
+                      className="p-0.5 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 cursor-pointer"
                     >
                       <X className="w-3.5 h-3.5" />
                     </button>
                   </div>
 
-                  <div className="space-y-2.5 text-xs leading-relaxed text-slate-600 dark:text-slate-300">
+                  <div className="space-y-2.5 text-xs leading-relaxed text-neutral-600 dark:text-neutral-300">
                     <div>
-                      <span className="font-semibold text-slate-900 dark:text-slate-100">An:</span>{' '}
+                      <span className="font-semibold text-neutral-900 dark:text-neutral-100">An:</span>{' '}
                       Verfeinert automatisch direkt beim Einfügen (<span className="font-mono tabular-nums">60 ms</span>), nach kurzen Tipp-Pausen (<span className="font-mono tabular-nums">420 ms</span>) sowie bei jedem Stil- oder Sprachwechsel.
                     </div>
-                    <div className="pt-2 border-t border-slate-200/80 dark:border-slate-800">
-                      <span className="font-semibold text-slate-900 dark:text-slate-100">Aus:</span>{' '}
-                      Kein automatischer Abruf während des Schreibens. Startet gezielt über <span className="font-medium text-slate-800 dark:text-slate-200">Verfeinern</span> oder <span className="font-mono">Strg/Cmd + Enter</span> – ideal für längere Entwürfe und zum Sparen von API-Anfragen.
+                    <div className="pt-2 border-t border-neutral-200 dark:border-neutral-800">
+                      <span className="font-semibold text-neutral-900 dark:text-neutral-100">Aus:</span>{' '}
+                      Kein automatischer Abruf während des Schreibens. Startet gezielt über <span className="font-medium text-neutral-800 dark:text-neutral-200">Verfeinern</span> oder <span className="font-mono">[⌘↵]</span> – ideal für längere Entwürfe und zum Sparen von API-Anfragen.
                     </div>
                   </div>
                 </motion.div>
@@ -989,20 +987,11 @@ export function WriteWorkspace({
             </AnimatePresence>
           </div>
 
-          <button
-            type="button"
-            onClick={onToggleDarkMode}
-            aria-label={darkMode ? 'Helles Design' : 'Dunkles Design'}
-            className="p-2 rounded-xl border border-slate-200/90 dark:border-slate-800 bg-white/90 dark:bg-[#0E131D] text-slate-600 dark:text-slate-300 hover:text-slate-950 dark:hover:text-white shadow-2xs transition-colors cursor-pointer"
-          >
-            {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-          </button>
-
           {isStreaming ? (
             <button
               type="button"
               onClick={handleStopStreaming}
-              className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium rounded-xl bg-slate-950 dark:bg-white text-white dark:text-slate-950 hover:opacity-90 active:scale-[0.98] transition-all duration-150 whitespace-nowrap shrink-0 cursor-pointer shadow-xs"
+              className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-md bg-rose-600 text-white hover:bg-rose-700 active:scale-[0.98] transition-all whitespace-nowrap shrink-0 cursor-pointer shadow-xs"
             >
               <Square className="w-3 h-3 fill-current" />
               Stoppen
@@ -1012,20 +1001,21 @@ export function WriteWorkspace({
               type="button"
               disabled={!sourceText.trim() || !status.configured}
               onClick={() => runRewrite(sourceText, sourceLang, mode, style)}
-              className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium rounded-xl bg-blue-700 dark:bg-blue-600 text-white hover:bg-blue-800 dark:hover:bg-blue-500 active:scale-[0.98] disabled:opacity-45 disabled:cursor-not-allowed transition-all duration-150 whitespace-nowrap shrink-0 cursor-pointer shadow-xs"
+              className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-md bg-neutral-950 dark:bg-white text-white dark:text-neutral-950 hover:bg-neutral-800 dark:hover:bg-neutral-100 border border-neutral-950 dark:border-white active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed transition-all whitespace-nowrap shrink-0 cursor-pointer shadow-xs"
             >
               <Sparkles className="w-3.5 h-3.5" />
-              Verfeinern
+              <span>Verfeinern</span>
+              <span className="font-mono opacity-60 text-[10.5px] ml-0.5 tracking-tight">[⌘↵]</span>
             </button>
           )}
         </div>
       </div>
 
       {/* Main Two-Column Editor */}
-      <div className="border border-slate-200/90 dark:border-slate-800 rounded-2xl bg-white dark:bg-[#101623] shadow-[0_1px_2px_rgba(15,23,42,0.04),0_18px_42px_-18px_rgba(15,23,42,0.1)] dark:shadow-[0_1px_2px_rgba(0,0,0,0.45),0_22px_50px_-20px_rgba(0,0,0,0.7)] overflow-hidden grid grid-cols-1 lg:grid-cols-2 lg:divide-x lg:divide-slate-200/90 dark:lg:divide-slate-800 min-h-[540px] lg:h-[calc(100vh-188px)]">
+      <div className="border border-neutral-300/90 dark:border-neutral-800 rounded-lg bg-white dark:bg-[#0C1019] shadow-sm overflow-hidden grid grid-cols-1 lg:grid-cols-2 lg:divide-x lg:divide-neutral-300/90 dark:lg:divide-neutral-800 min-h-[540px] lg:h-[calc(100vh-188px)]">
         {/* Left Column: Original */}
-        <section className="flex flex-col min-h-[320px] lg:min-h-0 bg-[#FAFBFD] dark:bg-[#0B0F17]">
-          <div className="h-12 px-5 border-b border-slate-200/80 dark:border-slate-800/90 flex items-center justify-between gap-3 shrink-0">
+        <section className="flex flex-col min-h-[320px] lg:min-h-0 bg-[#FAFAFA] dark:bg-[#080B10]">
+          <div className="h-12 px-5 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between gap-3 shrink-0">
             <div className="flex items-center gap-3">
               <label htmlFor="source-lang" className="sr-only">
                 Ausgangssprache
