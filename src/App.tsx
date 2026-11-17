@@ -4,8 +4,10 @@ import { ModelsView } from './components/ModelsView';
 import { OpenRouterDrawer } from './components/OpenRouterDrawer';
 import { PaidModelsPasswordModal } from './components/PaidModelsPasswordModal';
 import { PreferencesView } from './components/PreferencesView';
+import { SettingsModal } from './components/SettingsModal';
 import { TopBar } from './components/TopBar';
 import type { ActiveTab } from './components/TopBar';
+import { TranslateWorkspace } from './components/TranslateWorkspace';
 import { WriteWorkspace } from './components/WriteWorkspace';
 import {
   clearHistoryEntries,
@@ -28,6 +30,8 @@ import type {
   OpenRouterStatus,
   RewriteMode,
   SourceLanguageId,
+  TargetLanguageId,
+  TranslationTone,
   WritingPreferences,
   WritingStyleId,
 } from './types';
@@ -35,6 +39,7 @@ import type {
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('editor');
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [workspaceSettingsOpen, setWorkspaceSettingsOpen] = useState(false);
   const [unlockModalOpen, setUnlockModalOpen] = useState(false);
   const [pendingUnlockModel, setPendingUnlockModel] = useState<OpenRouterModel | null>(null);
   const [pendingUnlockSlot, setPendingUnlockSlot] = useState<'primary' | 'secondary'>('primary');
@@ -72,6 +77,14 @@ export default function App() {
   const [style, setStyle] = useState<WritingStyleId>('ausgewogen');
   const [changes, setChanges] = useState<ChangeItem[]>([]);
 
+  // Translate state
+  const [translateSourceText, setTranslateSourceText] = useState('');
+  const [translateTargetText, setTranslateTargetText] = useState('');
+  const [translateSourceLang, setTranslateSourceLang] = useState<SourceLanguageId>('auto');
+  const [translateTargetLang, setTranslateTargetLang] = useState<TargetLanguageId>('en-US');
+  const [translateTone, setTranslateTone] = useState<TranslationTone>('neutral');
+  const [translateChanges, setTranslateChanges] = useState<ChangeItem[]>([]);
+
   useEffect(() => {
     document.documentElement.classList.toggle('dark', darkMode);
   }, [darkMode]);
@@ -86,6 +99,14 @@ export default function App() {
       setStatus(s);
       setHistory(h);
       setPreferences(p);
+      if (p.settings) {
+        setSourceLang(p.settings.defaultSourceLang);
+        setTranslateSourceLang(p.settings.defaultSourceLang);
+        setTranslateTargetLang(p.settings.defaultTargetLang);
+        setMode(p.settings.defaultWriteMode);
+        setStyle(p.settings.defaultWriteStyle);
+        setTranslateTone(p.settings.defaultTranslationTone);
+      }
     } finally {
       setHistoryLoading(false);
       setPreferencesLoading(false);
@@ -117,6 +138,8 @@ export default function App() {
     sourceText: string;
     refinedText: string;
     sourceLang: SourceLanguageId;
+    targetLang?: TargetLanguageId;
+    task?: 'rewrite' | 'translate';
     mode: RewriteMode;
     style: WritingStyleId;
     model: string;
@@ -190,13 +213,21 @@ export default function App() {
   }
 
   function handleLoadHistoryEntry(entry: HistoryEntry) {
-    setSourceText(entry.sourceText);
-    setRefinedText(entry.refinedText);
-    setSourceLang(entry.sourceLang);
-    setMode(entry.mode);
-    setStyle(entry.style);
-    setChanges(entry.changes ?? []);
-    setActiveTab('editor');
+    if (entry.task === 'translate' && entry.targetLang) {
+      setTranslateSourceText(entry.sourceText);
+      setTranslateTargetText(entry.refinedText);
+      setTranslateSourceLang(entry.sourceLang);
+      setTranslateTargetLang(entry.targetLang);
+      setActiveTab('translate');
+    } else {
+      setSourceText(entry.sourceText);
+      setRefinedText(entry.refinedText);
+      setSourceLang(entry.sourceLang);
+      setMode(entry.mode);
+      setStyle(entry.style);
+      setChanges(entry.changes ?? []);
+      setActiveTab('editor');
+    }
   }
 
   const activePreferencesCount =
@@ -211,7 +242,10 @@ export default function App() {
         historyCount={history.length}
         rulesCount={activePreferencesCount}
         status={status}
+        darkMode={darkMode}
+        onToggleDarkMode={() => setDarkMode((v) => !v)}
         onOpenSettings={() => setSettingsOpen(true)}
+        onOpenWorkspaceSettings={() => setWorkspaceSettingsOpen(true)}
       />
 
       <main>
@@ -233,6 +267,30 @@ export default function App() {
             onChangeMode={setMode}
             onChangeStyle={setStyle}
             onChangeChanges={setChanges}
+            onOpenSettings={() => setSettingsOpen(true)}
+            onRequestUnlock={() => handleRequestUnlock()}
+            onSaveHistory={handleSaveHistory}
+          />
+        )}
+
+        {activeTab === 'translate' && (
+          <TranslateWorkspace
+            status={status}
+            preferences={preferences}
+            sourceText={translateSourceText}
+            translatedText={translateTargetText}
+            sourceLang={translateSourceLang}
+            targetLang={translateTargetLang}
+            tone={translateTone}
+            changes={translateChanges}
+            darkMode={darkMode}
+            onToggleDarkMode={() => setDarkMode((v) => !v)}
+            onChangeSourceText={setTranslateSourceText}
+            onChangeTranslatedText={setTranslateTargetText}
+            onChangeSourceLang={setTranslateSourceLang}
+            onChangeTargetLang={setTranslateTargetLang}
+            onChangeTone={setTranslateTone}
+            onChangeChanges={setTranslateChanges}
             onOpenSettings={() => setSettingsOpen(true)}
             onRequestUnlock={() => handleRequestUnlock()}
             onSaveHistory={handleSaveHistory}
@@ -279,6 +337,13 @@ export default function App() {
         onStatusUpdated={setStatus}
         onRequestUnlock={handleRequestUnlock}
         onLockPaid={handleLockPaid}
+      />
+
+      <SettingsModal
+        open={workspaceSettingsOpen}
+        onClose={() => setWorkspaceSettingsOpen(false)}
+        preferences={preferences}
+        onUpdatePreferences={handleUpdatePreferences}
       />
 
       <PaidModelsPasswordModal

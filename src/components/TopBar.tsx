@@ -1,8 +1,8 @@
-import { KeyRound } from 'lucide-react';
+import { KeyRound, Moon, Settings, Sun } from 'lucide-react';
 import { motion } from 'motion/react';
 import type { OpenRouterStatus } from '../types';
 
-export type ActiveTab = 'editor' | 'rules' | 'history' | 'models';
+export type ActiveTab = 'editor' | 'translate' | 'rules' | 'history' | 'models';
 
 interface TopBarProps {
   activeTab: ActiveTab;
@@ -10,7 +10,10 @@ interface TopBarProps {
   historyCount: number;
   rulesCount: number;
   status: OpenRouterStatus;
+  darkMode: boolean;
+  onToggleDarkMode: () => void;
   onOpenSettings: () => void;
+  onOpenWorkspaceSettings: () => void;
 }
 
 export function TopBar({
@@ -19,10 +22,14 @@ export function TopBar({
   historyCount,
   rulesCount,
   status,
+  darkMode,
+  onToggleDarkMode,
   onOpenSettings,
+  onOpenWorkspaceSettings,
 }: TopBarProps) {
   const navItems: Array<{ id: ActiveTab; label: string; count?: number }> = [
     { id: 'editor', label: 'Editor' },
+    { id: 'translate', label: 'Übersetzen' },
     { id: 'rules', label: 'Wörterbuch & Regeln', count: rulesCount > 0 ? rulesCount : undefined },
     { id: 'history', label: 'Verlauf', count: historyCount > 0 ? historyCount : undefined },
     { id: 'models', label: 'Modelle' },
@@ -30,16 +37,16 @@ export function TopBar({
 
   return (
     <header className="sticky top-0 z-30 h-14 border-b border-slate-200/85 dark:border-slate-800/85 bg-white/85 dark:bg-[#0C1018]/85 backdrop-blur-md">
-      <div className="max-w-[1440px] mx-auto h-full px-4 sm:px-6 flex items-center justify-between gap-8">
+      <div className="max-w-[1440px] mx-auto h-full px-4 sm:px-6 flex items-center justify-between gap-6">
         <button
           type="button"
           onClick={() => onSelectTab('editor')}
-          className="font-display font-semibold text-[21px] tracking-[-0.03em] text-slate-950 dark:text-white whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-600 cursor-pointer"
+          className="font-display font-semibold text-[19px] sm:text-[21px] tracking-[-0.03em] text-slate-950 dark:text-white whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-600 cursor-pointer"
         >
-          HighL Write
+          ÜxzWrite &amp; Translate
         </button>
 
-        <nav className="flex items-center gap-7 overflow-x-auto no-scrollbar" aria-label="Hauptnavigation">
+        <nav className="flex items-center gap-6 overflow-x-auto no-scrollbar" aria-label="Hauptnavigation">
           {navItems.map((item) => {
             const active = activeTab === item.id;
             return (
@@ -71,7 +78,25 @@ export function TopBar({
           })}
         </nav>
 
-        <div className="shrink-0">
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={onToggleDarkMode}
+            aria-label={darkMode ? 'Helles Design' : 'Dunkles Design'}
+            className="p-2 rounded-xl border border-slate-200/90 dark:border-slate-800 bg-white/90 dark:bg-[#131924] text-slate-600 dark:text-slate-300 hover:text-slate-950 dark:hover:text-white shadow-2xs transition-colors cursor-pointer"
+          >
+            {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+          </button>
+
+          <button
+            type="button"
+            onClick={onOpenWorkspaceSettings}
+            aria-label="Standard-Einstellungen"
+            className="p-2 rounded-xl border border-slate-200/90 dark:border-slate-800 bg-white/90 dark:bg-[#131924] text-slate-600 dark:text-slate-300 hover:text-slate-950 dark:hover:text-white shadow-2xs transition-colors cursor-pointer"
+          >
+            <Settings className="w-4 h-4" />
+          </button>
+
           <button
             type="button"
             onClick={onOpenSettings}
@@ -82,7 +107,7 @@ export function TopBar({
             }`}
           >
             <KeyRound className="w-3.5 h-3.5 shrink-0 opacity-85" />
-            <span className="max-w-[180px] truncate">
+            <span className="max-w-[140px] truncate">
               {status.configured
                 ? status.model === 'openrouter/free'
                   ? 'Free Models Router'
