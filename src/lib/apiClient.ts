@@ -44,31 +44,89 @@ const BUILD_PAID_PASSWORD_HASH = (import.meta.env.VITE_PAID_MODELS_PASSWORD_HASH
   .trim()
   .toLowerCase();
 
-// Session state with sessionStorage persistence for the current browser tab/session (never localStorage)
-let backendAvailable: boolean | null = null;
-let memoryApiKey = '';
-if (typeof window !== 'undefined') {
+// Client-side persistence for static hosting (GitHub Pages / Cloudflare Pages)
+const STORAGE_KEY_API_KEY = 'openrouter_api_key';
+const STORAGE_KEY_MODEL = 'openrouter_model';
+const STORAGE_KEY_SECONDARY_MODEL = 'openrouter_secondary_model';
+const STORAGE_KEY_DUAL = 'openrouter_dual_review';
+const STORAGE_KEY_PREFS = 'uxz_writing_preferences';
+const STORAGE_KEY_HISTORY = 'uxz_rewrite_history';
+
+function getStoredString(key: string): string {
+  if (typeof window === 'undefined') return '';
   try {
-    memoryApiKey = sessionStorage.getItem('openrouter_api_key') || '';
+    return localStorage.getItem(key) || sessionStorage.getItem(key) || '';
+  } catch {
+    return '';
+  }
+}
+
+function setStoredString(key: string, value: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(key, value);
+    sessionStorage.setItem(key, value);
   } catch {
     // ignore
   }
 }
-let memoryModel = DEFAULT_MODEL;
-let memoryDualReviewEnabled = false;
-let memorySecondaryModel = DEFAULT_MODEL;
+
+function removeStoredString(key: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.removeItem(key);
+    sessionStorage.removeItem(key);
+  } catch {
+    // ignore
+  }
+}
+
+function loadInitialPreferences(): WritingPreferences {
+  const fallback: WritingPreferences = {
+    terms: [],
+    rules: DEFAULT_STARTER_RULES.map((r) => ({ ...r })),
+    settings: {
+      ...DEFAULT_WORKSPACE_SETTINGS,
+      enabledLanguages: [...DEFAULT_WORKSPACE_SETTINGS.enabledLanguages],
+    },
+  };
+  if (typeof window === 'undefined') return fallback;
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_PREFS) || sessionStorage.getItem(STORAGE_KEY_PREFS);
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw);
+    return {
+      terms: Array.isArray(parsed.terms) ? parsed.terms : fallback.terms,
+      rules: Array.isArray(parsed.rules) ? parsed.rules : fallback.rules,
+      settings: parsed.settings ? { ...fallback.settings, ...parsed.settings } : fallback.settings,
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+function loadInitialHistory(): HistoryEntry[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_HISTORY) || sessionStorage.getItem(STORAGE_KEY_HISTORY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+let backendAvailable: boolean | null = null;
+let memoryApiKey = getStoredString(STORAGE_KEY_API_KEY);
+let memoryModel = getStoredString(STORAGE_KEY_MODEL) || DEFAULT_MODEL;
+let memoryDualReviewEnabled = getStoredString(STORAGE_KEY_DUAL) === 'true';
+let memorySecondaryModel = getStoredString(STORAGE_KEY_SECONDARY_MODEL) || DEFAULT_MODEL;
 let memoryKeyInfo: OpenRouterStatus['keyInfo'] = null;
 let memoryPaidUnlocked = false;
 let memoryPaidPasswordHash = '';
-let memoryHistory: HistoryEntry[] = [];
-let memoryPreferences: WritingPreferences = {
-  terms: [],
-  rules: DEFAULT_STARTER_RULES.map((r) => ({ ...r })),
-  settings: {
-    ...DEFAULT_WORKSPACE_SETTINGS,
-    enabledLanguages: [...DEFAULT_WORKSPACE_SETTINGS.enabledLanguages],
-  },
-};
+let memoryHistory: HistoryEntry[] = loadInitialHistory();
+let memoryPreferences: WritingPreferences = loadInitialPreferences();
 let cachedStaticModels: { fetchedAt: number; models: OpenRouterModel[] } | null = null;
 
 async function sha256Hex(input: string): Promise<string> {
@@ -153,6 +211,36 @@ export async function fetchOpenRouterStatus(): Promise<OpenRouterStatus> {
     const data = (await res.json()) as OpenRouterStatus;
     return { ...data, backendAvailable: true };
   }
+
+  // In static client mode: if we restored an API key from storage but haven't fetched keyInfo yet, query OpenRouter
+  if (memoryApiKey && !memoryKeyInfo) {
+    try {
+      const verifyRes = await fetch('https://openrouter.ai/api/v1/auth/key', {
+        headers: { Authorization: `Bearer ${memoryApiKey}` },
+      });
+      if (verifyRes.ok) {
+        const verifyJson = (await verifyRes.json().catch(() => null)) as {
+          data?: {
+            label?: string | null;
+            limit?: number | null;
+            usage?: number | null;
+            is_free_tier?: boolean | null;
+          };
+        } | null;
+        if (verifyJson?.data) {
+          memoryKeyInfo = {
+            label: verifyJson.data.label ?? null,
+            limit: verifyJson.data.limit ?? null,
+            usage: verifyJson.data.usage ?? null,
+            isFreeTier: verifyJson.data.is_free_tier ?? null,
+          };
+        }
+      }
+    } catch {
+      // ignore network issues during initial status check
+    }
+  }
+
   return getStaticStatus();
 }
 
@@ -235,13 +323,7 @@ export async function saveOpenRouterConfig(params: {
   secondaryModel?: string;
 }): Promise<{ ok: true; status: OpenRouterStatus } | { ok: false; error: string; code?: string }> {
   if (typeof params.apiKey === 'string' && params.apiKey.trim().length > 0) {
-    if (typeof window !== 'undefined') {
-      try {
-        sessionStorage.setItem('openrouter_api_key', params.apiKey.trim());
-      } catch {
-        // ignore
-      }
-    }
+    setStoredString(STORAGE_KEY_API_KEY, params.apiKey.trim());
   }
 
   const hasBackend = await detectBackend();
@@ -292,7 +374,7 @@ export async function saveOpenRouterConfig(params: {
     }
   }
 
-  // Static Cloudflare Pages BYOK mode: verify directly against OpenRouter API
+  // Static Cloudflare/GitHub Pages BYOK mode: verify directly against OpenRouter API
   if (typeof params.apiKey === 'string' && params.apiKey.trim().length > 0) {
     const candidate = params.apiKey.trim();
     try {
@@ -322,13 +404,7 @@ export async function saveOpenRouterConfig(params: {
       } | null;
 
       memoryApiKey = candidate;
-      if (typeof window !== 'undefined') {
-        try {
-          sessionStorage.setItem('openrouter_api_key', candidate);
-        } catch {
-          // ignore
-        }
-      }
+      setStoredString(STORAGE_KEY_API_KEY, candidate);
       memoryKeyInfo = verifyJson?.data
         ? {
             label: verifyJson.data.label ?? null,
@@ -347,12 +423,15 @@ export async function saveOpenRouterConfig(params: {
 
   if (typeof params.model === 'string' && params.model.trim().length > 0) {
     memoryModel = params.model.trim();
+    setStoredString(STORAGE_KEY_MODEL, memoryModel);
   }
   if (typeof params.dualReviewEnabled === 'boolean') {
     memoryDualReviewEnabled = params.dualReviewEnabled;
+    setStoredString(STORAGE_KEY_DUAL, String(memoryDualReviewEnabled));
   }
   if (typeof params.secondaryModel === 'string' && params.secondaryModel.trim().length > 0) {
     memorySecondaryModel = params.secondaryModel.trim();
+    setStoredString(STORAGE_KEY_SECONDARY_MODEL, memorySecondaryModel);
   }
 
   return { ok: true, status: getStaticStatus() };
@@ -361,13 +440,7 @@ export async function saveOpenRouterConfig(params: {
 export async function removeOpenRouterKey(): Promise<
   { ok: true; status: OpenRouterStatus } | { ok: false; error: string }
 > {
-  if (typeof window !== 'undefined') {
-    try {
-      sessionStorage.removeItem('openrouter_api_key');
-    } catch {
-      // ignore
-    }
-  }
+  removeStoredString(STORAGE_KEY_API_KEY);
 
   const hasBackend = await detectBackend();
   if (hasBackend) {
@@ -984,6 +1057,7 @@ export async function saveHistoryEntry(payload: {
     createdAt: new Date().toISOString(),
   };
   memoryHistory = [entry, ...memoryHistory].slice(0, 50);
+  setStoredString(STORAGE_KEY_HISTORY, JSON.stringify(memoryHistory));
   return memoryHistory;
 }
 
@@ -996,6 +1070,7 @@ export async function deleteHistoryEntry(id: string): Promise<HistoryEntry[]> {
     return data.entries ?? [];
   }
   memoryHistory = memoryHistory.filter((e) => e.id !== id);
+  setStoredString(STORAGE_KEY_HISTORY, JSON.stringify(memoryHistory));
   return memoryHistory;
 }
 
@@ -1006,6 +1081,7 @@ export async function clearHistoryEntries(): Promise<HistoryEntry[]> {
     return [];
   }
   memoryHistory = [];
+  removeStoredString(STORAGE_KEY_HISTORY);
   return [];
 }
 
@@ -1022,6 +1098,7 @@ export async function fetchWritingPreferences(): Promise<WritingPreferences> {
 
 export async function saveWritingPreferences(prefs: WritingPreferences): Promise<WritingPreferences> {
   memoryPreferences = prefs;
+  setStoredString(STORAGE_KEY_PREFS, JSON.stringify(prefs));
   const hasBackend = await detectBackend();
   if (hasBackend) {
     const res = await fetch('./api/preferences', {

@@ -1,5 +1,7 @@
 import { KeyRound, Moon, Settings, Sun } from 'lucide-react';
 import { motion } from 'motion/react';
+import logoDark from '../assets/logo-dark.png';
+import logoLight from '../assets/logo-light.png';
 import type { OpenRouterStatus } from '../types';
 
 export type ActiveTab = 'editor' | 'translate' | 'rules' | 'history' | 'models';
@@ -41,9 +43,20 @@ export function TopBar({
         <button
           type="button"
           onClick={() => onSelectTab('editor')}
-          className="font-display font-semibold text-[19px] sm:text-[21px] tracking-[-0.03em] text-slate-950 dark:text-white whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-600 cursor-pointer"
+          className="flex items-center gap-2.5 font-display font-semibold text-[17px] sm:text-[18px] tracking-[-0.02em] text-slate-950 dark:text-white whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-600 cursor-pointer group"
+          aria-label="Üxz | Write & Translate"
         >
-          ÜxzWrite &amp; Translate
+          <img
+            src={darkMode ? logoDark : logoLight}
+            alt="Üxz Logo"
+            className="h-6 sm:h-7 w-auto object-contain [image-rendering:pixelated] transition-transform duration-150 group-hover:scale-105"
+          />
+          <span className="text-slate-300 dark:text-slate-700 font-light select-none text-[18px]" aria-hidden="true">
+            |
+          </span>
+          <span className="font-semibold text-slate-900 dark:text-slate-100">
+            Write &amp; Translate
+          </span>
         </button>
 
         <nav className="flex items-center gap-6 overflow-x-auto no-scrollbar" aria-label="Hauptnavigation">

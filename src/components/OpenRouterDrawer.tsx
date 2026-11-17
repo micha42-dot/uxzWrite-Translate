@@ -265,7 +265,7 @@ export function OpenRouterDrawer({
                   : status.source === 'env'
                     ? 'Server-Umgebung aktiv'
                     : status.source === 'memory'
-                      ? 'Direktmodus (nur Arbeitsspeicher)'
+                      ? 'Direktmodus (im Browser gespeichert)'
                       : 'Nicht verbunden'}
               </span>
               {status.keyPreview && (
