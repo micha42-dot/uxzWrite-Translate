@@ -44,9 +44,16 @@ const BUILD_PAID_PASSWORD_HASH = (import.meta.env.VITE_PAID_MODELS_PASSWORD_HASH
   .trim()
   .toLowerCase();
 
-// Strictly in-memory session state for static hosting (Cloudflare Pages) — never persisted in localStorage
+// Session state with sessionStorage persistence for the current browser tab/session (never localStorage)
 let backendAvailable: boolean | null = null;
 let memoryApiKey = '';
+if (typeof window !== 'undefined') {
+  try {
+    memoryApiKey = sessionStorage.getItem('openrouter_api_key') || '';
+  } catch {
+    // ignore
+  }
+}
 let memoryModel = DEFAULT_MODEL;
 let memoryDualReviewEnabled = false;
 let memorySecondaryModel = DEFAULT_MODEL;
@@ -227,6 +234,16 @@ export async function saveOpenRouterConfig(params: {
   dualReviewEnabled?: boolean;
   secondaryModel?: string;
 }): Promise<{ ok: true; status: OpenRouterStatus } | { ok: false; error: string; code?: string }> {
+  if (typeof params.apiKey === 'string' && params.apiKey.trim().length > 0) {
+    if (typeof window !== 'undefined') {
+      try {
+        sessionStorage.setItem('openrouter_api_key', params.apiKey.trim());
+      } catch {
+        // ignore
+      }
+    }
+  }
+
   const hasBackend = await detectBackend();
   if (hasBackend) {
     try {
@@ -305,6 +322,13 @@ export async function saveOpenRouterConfig(params: {
       } | null;
 
       memoryApiKey = candidate;
+      if (typeof window !== 'undefined') {
+        try {
+          sessionStorage.setItem('openrouter_api_key', candidate);
+        } catch {
+          // ignore
+        }
+      }
       memoryKeyInfo = verifyJson?.data
         ? {
             label: verifyJson.data.label ?? null,
@@ -337,6 +361,14 @@ export async function saveOpenRouterConfig(params: {
 export async function removeOpenRouterKey(): Promise<
   { ok: true; status: OpenRouterStatus } | { ok: false; error: string }
 > {
+  if (typeof window !== 'undefined') {
+    try {
+      sessionStorage.removeItem('openrouter_api_key');
+    } catch {
+      // ignore
+    }
+  }
+
   const hasBackend = await detectBackend();
   if (hasBackend) {
     try {
