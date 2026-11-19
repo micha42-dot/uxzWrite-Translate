@@ -1,3 +1,8 @@
+import { isModelFreeForProvider } from './lib/providers';
+import type { ApiProviderId } from './lib/providers';
+
+export type { ApiProviderId };
+
 export type UiLanguage = 'de' | 'en';
 
 export type RewriteMode = 'correction' | 'style';
@@ -50,6 +55,9 @@ export interface StyleOption {
 
 export interface OpenRouterStatus {
   configured: boolean;
+  provider: ApiProviderId;
+  customBaseUrl?: string;
+  configuredProviders?: ApiProviderId[];
   source: 'session' | 'env' | 'memory' | 'none';
   keyPreview: string | null;
   model: string;
@@ -76,10 +84,10 @@ export interface OpenRouterModel {
 }
 
 export function isFreeOpenRouterModel(
-  model: Pick<OpenRouterModel, 'id' | 'promptPricePer1M' | 'completionPricePer1M'>
+  model: Pick<OpenRouterModel, 'id' | 'promptPricePer1M' | 'completionPricePer1M'>,
+  providerId: ApiProviderId = 'openrouter'
 ): boolean {
-  if (model.id === 'openrouter/free') return true;
-  return model.promptPricePer1M === 0 && model.completionPricePer1M === 0;
+  return isModelFreeForProvider(model, providerId);
 }
 
 export type ChangeCategory =

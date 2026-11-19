@@ -1,4 +1,13 @@
 import {
+  API_PROVIDERS,
+  getProviderDefinition,
+  isModelFreeForProvider,
+  isValidProviderId,
+  normalizeModelsCatalogResponse,
+  resolveProviderBaseUrl,
+  sanitizeProviderApiKey,
+} from './providers';
+import {
   LANGUAGE_INSTRUCTIONS,
   STYLE_INSTRUCTIONS,
   TARGET_LANGUAGE_NAMES,
@@ -11,6 +20,7 @@ import {
 } from './prompts';
 import { DEFAULT_STARTER_RULES, DEFAULT_WORKSPACE_SETTINGS } from '../types';
 import type {
+  ApiProviderId,
   ChangeCategory,
   ChangeItem,
   HistoryEntry,
@@ -27,25 +37,17 @@ import type {
 
 const DEFAULT_MODEL = 'openrouter/free';
 
-const FEATURED_ORDER = [
-  'openrouter/free',
-  'openrouter/auto',
-  'google/gemini-2.5-flash',
-  'google/gemini-2.0-flash-001',
-  'openai/gpt-4o-mini',
-  'anthropic/claude-3.5-haiku',
-  'anthropic/claude-3.5-sonnet',
-  'deepseek/deepseek-chat',
-  'openai/gpt-4o',
-  'meta-llama/llama-3.3-70b-instruct',
-];
-
 const BUILD_PAID_PASSWORD_HASH = (import.meta.env.VITE_PAID_MODELS_PASSWORD_HASH || '')
   .trim()
   .toLowerCase();
 
 // Client-side persistence for static hosting (GitHub Pages / Cloudflare Pages)
 const STORAGE_KEY_API_KEY = 'openrouter_api_key';
+const STORAGE_KEY_PROVIDER = 'uxz_provider';
+const STORAGE_KEY_PROVIDER_KEYS = 'uxz_provider_keys';
+const STORAGE_KEY_MODELS_BY_PROVIDER = 'uxz_models_by_provider';
+const STORAGE_KEY_SECONDARY_BY_PROVIDER = 'uxz_secondary_models_by_provider';
+const STORAGE_KEY_BASE_URLS_BY_PROVIDER = 'uxz_base_urls_by_provider';
 const STORAGE_KEY_MODEL = 'openrouter_model';
 const STORAGE_KEY_SECONDARY_MODEL = 'openrouter_secondary_model';
 const STORAGE_KEY_DUAL = 'openrouter_dual_review';
@@ -88,6 +90,45 @@ function removeStoredString(key: string): void {
   }
 }
 
+function getStoredJsonMap<T extends Record<string, string>>(key: string): T {
+  const raw = getStoredString(key);
+  if (!raw) return {} as T;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? (parsed as T) : ({} as T);
+  } catch {
+    return {} as T;
+  }
+}
+
+function loadInitialProviderKeys(): Partial<Record<ApiProviderId, string>> {
+  const map = getStoredJsonMap<Partial<Record<ApiProviderId, string>>>(STORAGE_KEY_PROVIDER_KEYS);
+  const legacyOpenRouter = sanitizeProviderApiKey(getStoredString(STORAGE_KEY_API_KEY));
+  if (legacyOpenRouter && !map.openrouter) {
+    map.openrouter = legacyOpenRouter;
+  }
+  const cleaned: Partial<Record<ApiProviderId, string>> = {};
+  for (const [k, v] of Object.entries(map)) {
+    if (isValidProviderId(k) && typeof v === 'string') {
+      const s = sanitizeProviderApiKey(v);
+      if (s) cleaned[k] = s;
+    }
+  }
+  return cleaned;
+}
+
+function loadInitialModelsMap(
+  mapKey: string,
+  legacyKey: string
+): Partial<Record<ApiProviderId, string>> {
+  const map = getStoredJsonMap<Partial<Record<ApiProviderId, string>>>(mapKey);
+  const legacy = getStoredString(legacyKey).trim();
+  if (legacy && !map.openrouter) {
+    map.openrouter = legacy;
+  }
+  return map;
+}
+
 function loadInitialPreferences(): WritingPreferences {
   const fallback: WritingPreferences = {
     terms: [],
@@ -127,17 +168,84 @@ function loadInitialHistory(): HistoryEntry[] {
 }
 
 let backendAvailable: boolean | null = null;
-let memoryApiKey = getStoredString(STORAGE_KEY_API_KEY);
-let memoryModel = getStoredString(STORAGE_KEY_MODEL) || DEFAULT_MODEL;
+const initialProviderRaw = getStoredString(STORAGE_KEY_PROVIDER);
+let memoryProvider: ApiProviderId = isValidProviderId(initialProviderRaw) ? initialProviderRaw : 'openrouter';
+let memoryProviderKeys: Partial<Record<ApiProviderId, string>> = loadInitialProviderKeys();
+let memoryModelsByProvider: Partial<Record<ApiProviderId, string>> = loadInitialModelsMap(
+  STORAGE_KEY_MODELS_BY_PROVIDER,
+  STORAGE_KEY_MODEL
+);
+let memorySecondaryByProvider: Partial<Record<ApiProviderId, string>> = loadInitialModelsMap(
+  STORAGE_KEY_SECONDARY_BY_PROVIDER,
+  STORAGE_KEY_SECONDARY_MODEL
+);
+let memoryBaseUrlsByProvider: Partial<Record<ApiProviderId, string>> = getStoredJsonMap(
+  STORAGE_KEY_BASE_URLS_BY_PROVIDER
+);
 let memoryDualReviewEnabled = getStoredString(STORAGE_KEY_DUAL) === 'true';
-let memorySecondaryModel = getStoredString(STORAGE_KEY_SECONDARY_MODEL) || DEFAULT_MODEL;
 let memoryEnforceZdr = getStoredString(STORAGE_KEY_ZDR) === 'true';
 let memoryKeyInfo: OpenRouterStatus['keyInfo'] = null;
 let memoryPaidUnlocked = false;
 let memoryPaidPasswordHash = '';
 let memoryHistory: HistoryEntry[] = loadInitialHistory();
 let memoryPreferences: WritingPreferences = loadInitialPreferences();
-let cachedStaticModels: { fetchedAt: number; models: OpenRouterModel[] } | null = null;
+const cachedStaticModelsByProvider = new Map<string, { fetchedAt: number; models: OpenRouterModel[] }>();
+
+function getActiveApiKey(providerId: ApiProviderId = memoryProvider): string {
+  return memoryProviderKeys[providerId] || '';
+}
+
+function getActiveBaseUrl(providerId: ApiProviderId = memoryProvider): string {
+  return resolveProviderBaseUrl(providerId, memoryBaseUrlsByProvider[providerId]);
+}
+
+function getActiveModelForProvider(providerId: ApiProviderId = memoryProvider): string {
+  const def = getProviderDefinition(providerId);
+  return memoryModelsByProvider[providerId] || (providerId === 'openrouter' ? DEFAULT_MODEL : def.defaultModel);
+}
+
+function getActiveSecondaryForProvider(providerId: ApiProviderId = memoryProvider): string {
+  const def = getProviderDefinition(providerId);
+  return (
+    memorySecondaryByProvider[providerId] ||
+    memoryModelsByProvider[providerId] ||
+    (providerId === 'openrouter' ? DEFAULT_MODEL : def.defaultModel)
+  );
+}
+
+function persistProviderMaps() {
+  setStoredString(STORAGE_KEY_PROVIDER, memoryProvider);
+  setStoredString(STORAGE_KEY_PROVIDER_KEYS, JSON.stringify(memoryProviderKeys));
+  setStoredString(STORAGE_KEY_MODELS_BY_PROVIDER, JSON.stringify(memoryModelsByProvider));
+  setStoredString(STORAGE_KEY_SECONDARY_BY_PROVIDER, JSON.stringify(memorySecondaryByProvider));
+  setStoredString(STORAGE_KEY_BASE_URLS_BY_PROVIDER, JSON.stringify(memoryBaseUrlsByProvider));
+  if (memoryProviderKeys.openrouter) {
+    setStoredString(STORAGE_KEY_API_KEY, memoryProviderKeys.openrouter);
+  } else {
+    removeStoredString(STORAGE_KEY_API_KEY);
+  }
+  setStoredString(STORAGE_KEY_MODEL, getActiveModelForProvider('openrouter'));
+  setStoredString(STORAGE_KEY_SECONDARY_MODEL, getActiveSecondaryForProvider('openrouter'));
+}
+
+function getBackendFallbackHeaders(providerOverride?: ApiProviderId): Record<string, string> {
+  const p = providerOverride || memoryProvider;
+  const key = getActiveApiKey(p);
+  const baseUrl = getActiveBaseUrl(p);
+  const headers: Record<string, string> = {
+    'X-Provider-Id': p,
+  };
+  if (key) {
+    headers['X-Provider-Key'] = key;
+    if (p === 'openrouter') {
+      headers['X-OpenRouter-Key'] = key;
+    }
+  }
+  if (p === 'custom' || p === 'requesty') {
+    headers['X-Custom-Base-Url'] = baseUrl;
+  }
+  return headers;
+}
 
 async function sha256Hex(input: string): Promise<string> {
   const bytes = new TextEncoder().encode(input);
@@ -156,16 +264,32 @@ function constantTimeEqual(a: string, b: string): boolean {
   return diff === 0;
 }
 
-async function isStaticModelFree(modelId: string): Promise<boolean> {
+function shouldEnforceStaticPaidLock(modelIsFree: boolean, providerId: ApiProviderId = memoryProvider): boolean {
+  if (memoryPaidUnlocked || modelIsFree) return false;
+  if (providerId === 'custom') return false;
+  if (providerId === 'openrouter') return true;
+  return Boolean(BUILD_PAID_PASSWORD_HASH || memoryPaidPasswordHash);
+}
+
+async function isStaticModelFree(
+  modelId: string,
+  providerId: ApiProviderId = memoryProvider
+): Promise<boolean> {
   const normalized = modelId.trim();
-  if (normalized === 'openrouter/free' || normalized.endsWith(':free')) return true;
-  if (cachedStaticModels) {
-    const match = cachedStaticModels.models.find((m) => m.id === normalized);
-    if (match) return match.promptPricePer1M === 0 && match.completionPricePer1M === 0;
+  if (providerId === 'custom') return true;
+  if (providerId === 'openrouter' && (normalized === 'openrouter/free' || normalized.endsWith(':free'))) {
+    return true;
   }
-  const models = await fetchOpenRouterModels().catch(() => []);
+  const baseUrl = getActiveBaseUrl(providerId);
+  const cacheKey = `${providerId}|${baseUrl}|${getActiveApiKey(providerId) ? 'auth' : 'pub'}`;
+  const cached = cachedStaticModelsByProvider.get(cacheKey);
+  if (cached) {
+    const match = cached.models.find((m) => m.id === normalized);
+    if (match) return isModelFreeForProvider(match, providerId);
+  }
+  const models = await fetchOpenRouterModels(providerId, baseUrl).catch(() => []);
   const match = models.find((m) => m.id === normalized);
-  return Boolean(match && match.promptPricePer1M === 0 && match.completionPricePer1M === 0);
+  return Boolean(match && isModelFreeForProvider(match, providerId));
 }
 
 function maskApiKey(key: string): string {
@@ -192,19 +316,41 @@ async function detectBackend(): Promise<boolean> {
   return false;
 }
 
+function getConfiguredProvidersStatic(): ApiProviderId[] {
+  const list: ApiProviderId[] = [];
+  for (const def of API_PROVIDERS) {
+    if (memoryProviderKeys[def.id]) {
+      list.push(def.id);
+    } else if (def.id === 'custom' && memoryBaseUrlsByProvider.custom) {
+      list.push('custom');
+    }
+  }
+  return list;
+}
+
 function getStaticStatus(): OpenRouterStatus {
+  const activeKey = getActiveApiKey(memoryProvider);
+  const def = getProviderDefinition(memoryProvider);
+  const activeModel = getActiveModelForProvider(memoryProvider);
+  const activeSecondary = getActiveSecondaryForProvider(memoryProvider);
+  const customBaseUrl = getActiveBaseUrl(memoryProvider);
+  const configured = def.optionalKey ? Boolean(customBaseUrl) : Boolean(activeKey);
+
   return {
-    configured: Boolean(memoryApiKey),
-    source: memoryApiKey ? 'memory' : 'none',
-    keyPreview: memoryApiKey ? maskApiKey(memoryApiKey) : null,
-    model: memoryModel,
+    configured,
+    provider: memoryProvider,
+    customBaseUrl,
+    configuredProviders: getConfiguredProvidersStatic(),
+    source: activeKey ? 'memory' : memoryProvider === 'custom' && memoryBaseUrlsByProvider.custom ? 'memory' : 'none',
+    keyPreview: activeKey ? maskApiKey(activeKey) : null,
+    model: activeModel,
     dualReviewEnabled: memoryDualReviewEnabled,
-    secondaryModel: memorySecondaryModel,
+    secondaryModel: activeSecondary,
     enforceZdr: memoryEnforceZdr,
     backendAvailable: false,
     paidModelsUnlocked: memoryPaidUnlocked,
     paidModelsPasswordConfigured: Boolean(BUILD_PAID_PASSWORD_HASH || memoryPaidPasswordHash),
-    keyInfo: memoryApiKey ? memoryKeyInfo : null,
+    keyInfo: memoryProvider === 'openrouter' && activeKey ? memoryKeyInfo : null,
   };
 }
 
@@ -218,16 +364,22 @@ function getReferer(): string {
 export async function fetchOpenRouterStatus(): Promise<OpenRouterStatus> {
   const hasBackend = await detectBackend();
   if (hasBackend) {
-    const res = await fetch('./api/openrouter/status');
+    const res = await fetch('./api/openrouter/status', {
+      headers: getBackendFallbackHeaders(),
+    });
     const data = (await res.json()) as OpenRouterStatus;
+    if (data.provider && isValidProviderId(data.provider)) {
+      memoryProvider = data.provider;
+    }
     return { ...data, backendAvailable: true };
   }
 
-  // In static client mode: if we restored an API key from storage but haven't fetched keyInfo yet, query OpenRouter
-  if (memoryApiKey && !memoryKeyInfo) {
+  // In static client mode: verify OpenRouter key metadata silently on initial boot
+  const activeKey = getActiveApiKey(memoryProvider);
+  if (memoryProvider === 'openrouter' && activeKey && !memoryKeyInfo) {
     try {
       const verifyRes = await fetch('https://openrouter.ai/api/v1/auth/key', {
-        headers: { Authorization: `Bearer ${memoryApiKey}` },
+        headers: { Authorization: `Bearer ${activeKey}` },
       });
       if (verifyRes.ok) {
         const verifyJson = (await verifyRes.json().catch(() => null)) as {
@@ -246,6 +398,10 @@ export async function fetchOpenRouterStatus(): Promise<OpenRouterStatus> {
             isFreeTier: verifyJson.data.is_free_tier ?? null,
           };
         }
+      } else if (verifyRes.status === 401 || verifyRes.status === 403) {
+        delete memoryProviderKeys.openrouter;
+        memoryKeyInfo = null;
+        persistProviderMaps();
       }
     } catch {
       // ignore network issues during initial status check
@@ -263,7 +419,7 @@ export async function unlockPaidModels(
     try {
       const res = await fetch('./api/openrouter/unlock-paid', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getBackendFallbackHeaders() },
         body: JSON.stringify({ password }),
       });
       const data = (await res.json()) as OpenRouterStatus & { error?: string };
@@ -319,7 +475,10 @@ export async function lockPaidModels(): Promise<
   const hasBackend = await detectBackend();
   if (hasBackend) {
     try {
-      const res = await fetch('./api/openrouter/lock-paid', { method: 'POST' });
+      const res = await fetch('./api/openrouter/lock-paid', {
+        method: 'POST',
+        headers: getBackendFallbackHeaders(),
+      });
       const data = (await res.json()) as OpenRouterStatus & { error?: string };
       if (!res.ok) {
         return { ok: false, error: data.error || 'Sperren fehlgeschlagen.' };
@@ -331,33 +490,213 @@ export async function lockPaidModels(): Promise<
   }
 
   memoryPaidUnlocked = false;
-  if (!(await isStaticModelFree(memoryModel))) {
-    memoryModel = DEFAULT_MODEL;
+  const def = getProviderDefinition(memoryProvider);
+  const fallbackModel = memoryProvider === 'openrouter' ? DEFAULT_MODEL : def.defaultModel;
+  if (!(await isStaticModelFree(getActiveModelForProvider(memoryProvider), memoryProvider))) {
+    memoryModelsByProvider[memoryProvider] = fallbackModel;
   }
-  if (!(await isStaticModelFree(memorySecondaryModel))) {
-    memorySecondaryModel = DEFAULT_MODEL;
+  if (!(await isStaticModelFree(getActiveSecondaryForProvider(memoryProvider), memoryProvider))) {
+    memorySecondaryByProvider[memoryProvider] = fallbackModel;
   }
+  persistProviderMaps();
   return { ok: true, status: getStaticStatus() };
 }
 
+async function verifyProviderKeyStatic(params: {
+  provider: ApiProviderId;
+  apiKey?: string;
+  customBaseUrl?: string;
+}): Promise<
+  | { ok: true; keyInfo: OpenRouterStatus['keyInfo'] }
+  | { ok: false; error: string }
+> {
+  const def = getProviderDefinition(params.provider);
+  const baseUrl = resolveProviderBaseUrl(params.provider, params.customBaseUrl);
+  const key = params.apiKey ? sanitizeProviderApiKey(params.apiKey) : '';
+
+  if (!key && !def.optionalKey) {
+    return {
+      ok: false,
+      error: isEnglishUi()
+        ? `The ${def.name} API key is empty or improperly formatted.`
+        : `Der ${def.name} API-Schlüssel ist leer oder ungültig formatiert.`,
+    };
+  }
+
+  try {
+    if (params.provider === 'openrouter') {
+      const verifyRes = await fetch('https://openrouter.ai/api/v1/auth/key', {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${key}` },
+      });
+      if (!verifyRes.ok) {
+        const errText = await verifyRes.text().catch(() => '');
+        return {
+          ok: false,
+          error:
+            verifyRes.status === 401 || verifyRes.status === 403
+              ? isEnglishUi()
+                ? 'The OpenRouter API key was rejected or is improperly formatted. Paste only the key (starting with sk-or-v1-…, without quotes or "Bearer").'
+                : 'Der OpenRouter API-Schlüssel wurde abgelehnt oder ist ungültig formatiert (bitte nur den Schlüssel z. B. sk-or-v1-… ohne Anführungszeichen oder „Bearer“ einfügen).'
+              : isEnglishUi()
+                ? `OpenRouter check failed (HTTP ${verifyRes.status}). ${errText}`.trim()
+                : `OpenRouter-Prüfung fehlgeschlagen (HTTP ${verifyRes.status}). ${errText}`.trim(),
+        };
+      }
+      const verifyJson = (await verifyRes.json().catch(() => null)) as {
+        data?: { label?: string | null; limit?: number | null; usage?: number | null; is_free_tier?: boolean | null };
+      } | null;
+      return {
+        ok: true,
+        keyInfo: verifyJson?.data
+          ? {
+              label: verifyJson.data.label ?? null,
+              limit: verifyJson.data.limit ?? null,
+              usage: verifyJson.data.usage ?? null,
+              isFreeTier: verifyJson.data.is_free_tier ?? null,
+            }
+          : null,
+      };
+    }
+
+    if (params.provider === 'huggingface') {
+      const verifyRes = await fetch('https://huggingface.co/api/whoami-v2', {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${key}` },
+      });
+      if (!verifyRes.ok) {
+        return {
+          ok: false,
+          error: isEnglishUi()
+            ? 'Hugging Face token rejected (401/403). Make sure your hf_… token has Inference Providers permission.'
+            : 'Hugging Face Token wurde abgelehnt (401/403). Bitte prüfe deinen hf_… Token mit Inference-Berechtigung.',
+        };
+      }
+      const who = (await verifyRes.json().catch(() => null)) as { name?: string } | null;
+      return { ok: true, keyInfo: who?.name ? { label: who.name } : null };
+    }
+
+    if (params.provider === 'requesty') {
+      const probeRes = await fetch(`${baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${key}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: def.defaultModel,
+          messages: [{ role: 'user', content: 'ok' }],
+          max_tokens: 1,
+        }),
+      });
+      if (probeRes.status === 401 || probeRes.status === 403) {
+        return {
+          ok: false,
+          error: isEnglishUi()
+            ? `Requesty API key was rejected (HTTP ${probeRes.status}).`
+            : `Requesty API-Schlüssel wurde abgelehnt (HTTP ${probeRes.status}).`,
+        };
+      }
+      return { ok: true, keyInfo: null };
+    }
+
+    const headers: Record<string, string> = {};
+    if (params.provider === 'anthropic') {
+      headers['x-api-key'] = key;
+      headers['anthropic-version'] = '2023-06-01';
+      headers['anthropic-dangerous-direct-browser-access'] = 'true';
+    } else if (key) {
+      headers['Authorization'] = `Bearer ${key}`;
+    }
+
+    const verifyRes = await fetch(`${baseUrl}/models`, { method: 'GET', headers });
+
+    if (verifyRes.status === 401 || verifyRes.status === 403) {
+      return {
+        ok: false,
+        error: isEnglishUi()
+          ? `${def.name} API key was rejected (HTTP ${verifyRes.status}).`
+          : `${def.name} API-Schlüssel wurde abgelehnt (HTTP ${verifyRes.status}).`,
+      };
+    }
+
+    if (!verifyRes.ok) {
+      const errText = await verifyRes.text().catch(() => '');
+      if (params.provider === 'gemini' && /api[_\s]*key|permission/i.test(errText)) {
+        return {
+          ok: false,
+          error: isEnglishUi()
+            ? 'The Google Gemini API key is invalid.'
+            : 'Der Google Gemini API-Schlüssel ist ungültig.',
+        };
+      }
+      if (params.provider === 'custom') {
+        if (verifyRes.status === 404) {
+          return { ok: true, keyInfo: null };
+        }
+        return {
+          ok: false,
+          error: isEnglishUi()
+            ? `Custom endpoint at ${baseUrl} returned HTTP ${verifyRes.status}.`
+            : `Custom-Endpunkt unter ${baseUrl} antwortete mit HTTP ${verifyRes.status}.`,
+        };
+      }
+      return {
+        ok: false,
+        error: isEnglishUi()
+          ? `${def.name} check failed (HTTP ${verifyRes.status}). ${errText.slice(0, 160)}`.trim()
+          : `${def.name}-Prüfung fehlgeschlagen (HTTP ${verifyRes.status}). ${errText.slice(0, 160)}`.trim(),
+      };
+    }
+
+    return { ok: true, keyInfo: null };
+  } catch (err) {
+    return {
+      ok: false,
+      error: isEnglishUi()
+        ? `Failed to connect to ${def.name}: ${err instanceof Error ? err.message : 'Unknown error'}`
+        : `Verbindung zu ${def.name} fehlgeschlagen: ${err instanceof Error ? err.message : 'Unbekannter Fehler'}`,
+    };
+  }
+}
+
 export async function saveOpenRouterConfig(params: {
+  provider?: ApiProviderId;
+  customBaseUrl?: string;
   apiKey?: string;
   model?: string;
   dualReviewEnabled?: boolean;
   secondaryModel?: string;
   enforceZdr?: boolean;
 }): Promise<{ ok: true; status: OpenRouterStatus } | { ok: false; error: string; code?: string }> {
-  if (typeof params.apiKey === 'string' && params.apiKey.trim().length > 0) {
-    setStoredString(STORAGE_KEY_API_KEY, params.apiKey.trim());
+  const sanitizedKey =
+    typeof params.apiKey === 'string' && params.apiKey.trim().length > 0
+      ? sanitizeProviderApiKey(params.apiKey)
+      : undefined;
+
+  if (typeof params.apiKey === 'string' && params.apiKey.trim().length > 0 && !sanitizedKey) {
+    return {
+      ok: false,
+      error: isEnglishUi()
+        ? 'The API key is empty or improperly formatted.'
+        : 'Der API-Schlüssel ist leer oder ungültig formatiert.',
+    };
   }
+
+  const targetProvider: ApiProviderId = params.provider && isValidProviderId(params.provider)
+    ? params.provider
+    : memoryProvider;
 
   const hasBackend = await detectBackend();
   if (hasBackend) {
     try {
       const res = await fetch('./api/openrouter/config', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(params),
+        headers: {
+          'Content-Type': 'application/json',
+          ...getBackendFallbackHeaders(targetProvider),
+        },
+        body: JSON.stringify({ ...params, provider: targetProvider, apiKey: sanitizedKey }),
       });
       const data = (await res.json()) as OpenRouterStatus & { error?: string; code?: string };
       if (!res.ok) {
@@ -367,15 +706,30 @@ export async function saveOpenRouterConfig(params: {
           code: data.code,
         };
       }
+      memoryProvider = targetProvider;
+      if (params.customBaseUrl) {
+        memoryBaseUrlsByProvider[targetProvider] = resolveProviderBaseUrl(targetProvider, params.customBaseUrl);
+      }
+      if (sanitizedKey) {
+        memoryProviderKeys[targetProvider] = sanitizedKey;
+      }
+      if (data.model) memoryModelsByProvider[targetProvider] = data.model;
+      if (data.secondaryModel) memorySecondaryByProvider[targetProvider] = data.secondaryModel;
+      persistProviderMaps();
       return { ok: true, status: { ...(data as OpenRouterStatus), backendAvailable: true } };
     } catch {
-      return { ok: false, error: 'Netzwerkfehler beim Speichern der OpenRouter-Konfiguration.' };
+      return { ok: false, error: 'Netzwerkfehler beim Speichern der API-Konfiguration.' };
     }
   }
 
-  if (typeof params.model === 'string' && params.model.trim().length > 0 && !memoryPaidUnlocked) {
-    const free = await isStaticModelFree(params.model.trim());
-    if (!free) {
+  const nextBaseUrl =
+    typeof params.customBaseUrl === 'string' && params.customBaseUrl.trim().length > 0
+      ? resolveProviderBaseUrl(targetProvider, params.customBaseUrl)
+      : getActiveBaseUrl(targetProvider);
+
+  if (typeof params.model === 'string' && params.model.trim().length > 0) {
+    const free = await isStaticModelFree(params.model.trim(), targetProvider);
+    if (shouldEnforceStaticPaidLock(free, targetProvider)) {
       return {
         ok: false,
         error: isEnglishUi()
@@ -386,13 +740,9 @@ export async function saveOpenRouterConfig(params: {
     }
   }
 
-  if (
-    typeof params.secondaryModel === 'string' &&
-    params.secondaryModel.trim().length > 0 &&
-    !memoryPaidUnlocked
-  ) {
-    const free = await isStaticModelFree(params.secondaryModel.trim());
-    if (!free) {
+  if (typeof params.secondaryModel === 'string' && params.secondaryModel.trim().length > 0) {
+    const free = await isStaticModelFree(params.secondaryModel.trim(), targetProvider);
+    if (shouldEnforceStaticPaidLock(free, targetProvider)) {
       return {
         ok: false,
         error: isEnglishUi()
@@ -403,88 +753,71 @@ export async function saveOpenRouterConfig(params: {
     }
   }
 
-  // Static Cloudflare/GitHub Pages BYOK mode: verify directly against OpenRouter API
-  if (typeof params.apiKey === 'string' && params.apiKey.trim().length > 0) {
-    const candidate = params.apiKey.trim();
-    try {
-      const verifyRes = await fetch('https://openrouter.ai/api/v1/auth/key', {
-        method: 'GET',
-        headers: {
-          Authorization: `Bearer ${candidate}`,
-        },
-      });
-      if (!verifyRes.ok) {
-        const errText = await verifyRes.text().catch(() => '');
-        return {
-          ok: false,
-          error:
-            verifyRes.status === 401 || verifyRes.status === 403
-              ? isEnglishUi()
-                ? 'The OpenRouter API key was rejected. Please check your key.'
-                : 'Der OpenRouter API-Schlüssel wurde abgelehnt. Bitte prüfe den Schlüssel.'
-              : isEnglishUi()
-                ? `OpenRouter check failed (HTTP ${verifyRes.status}). ${errText}`.trim()
-                : `OpenRouter-Prüfung fehlgeschlagen (HTTP ${verifyRes.status}). ${errText}`.trim(),
-        };
-      }
-      const verifyJson = (await verifyRes.json().catch(() => null)) as {
-        data?: {
-          label?: string | null;
-          limit?: number | null;
-          usage?: number | null;
-          is_free_tier?: boolean | null;
-        };
-      } | null;
-
-      memoryApiKey = candidate;
-      setStoredString(STORAGE_KEY_API_KEY, candidate);
-      memoryKeyInfo = verifyJson?.data
-        ? {
-            label: verifyJson.data.label ?? null,
-            limit: verifyJson.data.limit ?? null,
-            usage: verifyJson.data.usage ?? null,
-            isFreeTier: verifyJson.data.is_free_tier ?? null,
-          }
-        : null;
-    } catch (err) {
-      return {
-        ok: false,
-        error: isEnglishUi()
-          ? `Failed to connect to OpenRouter: ${err instanceof Error ? err.message : 'Unknown error'}`
-          : `Verbindung zu OpenRouter fehlgeschlagen: ${err instanceof Error ? err.message : 'Unbekannter Fehler'}`,
-      };
+  if (sanitizedKey) {
+    const verify = await verifyProviderKeyStatic({
+      provider: targetProvider,
+      apiKey: sanitizedKey,
+      customBaseUrl: nextBaseUrl,
+    });
+    if (!verify.ok) {
+      return { ok: false, error: verify.error };
     }
+    memoryProviderKeys[targetProvider] = sanitizedKey;
+    if (targetProvider === 'openrouter') {
+      memoryKeyInfo = verify.keyInfo;
+    }
+  } else if (targetProvider === 'custom' && typeof params.customBaseUrl === 'string' && params.customBaseUrl.trim()) {
+    const verify = await verifyProviderKeyStatic({
+      provider: 'custom',
+      apiKey: memoryProviderKeys.custom,
+      customBaseUrl: nextBaseUrl,
+    });
+    if (!verify.ok) {
+      return { ok: false, error: verify.error };
+    }
+  }
+
+  memoryProvider = targetProvider;
+  if (typeof params.customBaseUrl === 'string' && params.customBaseUrl.trim().length > 0) {
+    memoryBaseUrlsByProvider[targetProvider] = nextBaseUrl;
   }
 
   if (typeof params.model === 'string' && params.model.trim().length > 0) {
-    memoryModel = params.model.trim();
-    setStoredString(STORAGE_KEY_MODEL, memoryModel);
+    memoryModelsByProvider[targetProvider] = params.model.trim();
   }
   if (typeof params.dualReviewEnabled === 'boolean') {
     memoryDualReviewEnabled = params.dualReviewEnabled;
     setStoredString(STORAGE_KEY_DUAL, String(memoryDualReviewEnabled));
   }
   if (typeof params.secondaryModel === 'string' && params.secondaryModel.trim().length > 0) {
-    memorySecondaryModel = params.secondaryModel.trim();
-    setStoredString(STORAGE_KEY_SECONDARY_MODEL, memorySecondaryModel);
+    memorySecondaryByProvider[targetProvider] = params.secondaryModel.trim();
   }
   if (typeof params.enforceZdr === 'boolean') {
     memoryEnforceZdr = params.enforceZdr;
     setStoredString(STORAGE_KEY_ZDR, String(memoryEnforceZdr));
   }
 
+  persistProviderMaps();
   return { ok: true, status: getStaticStatus() };
 }
 
-export async function removeOpenRouterKey(): Promise<
+export async function removeOpenRouterKey(providerId?: ApiProviderId): Promise<
   { ok: true; status: OpenRouterStatus } | { ok: false; error: string }
 > {
-  removeStoredString(STORAGE_KEY_API_KEY);
+  const target = providerId || memoryProvider;
+  delete memoryProviderKeys[target];
+  if (target === 'openrouter') {
+    memoryKeyInfo = null;
+  }
+  persistProviderMaps();
 
   const hasBackend = await detectBackend();
   if (hasBackend) {
     try {
-      const res = await fetch('./api/openrouter/config', { method: 'DELETE' });
+      const res = await fetch(`./api/openrouter/config?provider=${encodeURIComponent(target)}`, {
+        method: 'DELETE',
+        headers: getBackendFallbackHeaders(target),
+      });
       const data = await res.json();
       if (!res.ok) {
         return { ok: false, error: data.error || 'Schlüssel konnte nicht entfernt werden.' };
@@ -495,71 +828,65 @@ export async function removeOpenRouterKey(): Promise<
     }
   }
 
-  memoryApiKey = '';
-  memoryKeyInfo = null;
   return { ok: true, status: getStaticStatus() };
 }
 
-export async function fetchOpenRouterModels(): Promise<OpenRouterModel[]> {
+export async function fetchOpenRouterModels(
+  providerOverride?: ApiProviderId,
+  baseUrlOverride?: string
+): Promise<OpenRouterModel[]> {
+  const targetProvider = providerOverride || memoryProvider;
+  const def = getProviderDefinition(targetProvider);
+  const baseUrl = resolveProviderBaseUrl(
+    targetProvider,
+    baseUrlOverride ?? memoryBaseUrlsByProvider[targetProvider]
+  );
+
   const hasBackend = await detectBackend();
   if (hasBackend) {
-    const res = await fetch('./api/openrouter/models');
-    if (!res.ok) return [];
-    const data = (await res.json()) as { models?: OpenRouterModel[] };
-    return data.models ?? [];
-  }
-
-  const now = Date.now();
-  if (cachedStaticModels && now - cachedStaticModels.fetchedAt < 10 * 60 * 1000) {
-    return cachedStaticModels.models;
-  }
-
-  const upstream = await fetch('https://openrouter.ai/api/v1/models');
-  if (!upstream.ok) return [];
-  const json = (await upstream.json()) as {
-    data?: Array<{
-      id: string;
-      name?: string;
-      context_length?: number;
-      pricing?: { prompt?: string; completion?: string };
-      architecture?: { modality?: string };
-    }>;
-  };
-
-  const models: OpenRouterModel[] = (json.data ?? [])
-    .filter((m) => m.id && (!m.architecture?.modality || m.architecture.modality.includes('text')))
-    .map((m) => {
-      const promptPerToken = Number(m.pricing?.prompt ?? 0);
-      const completionPerToken = Number(m.pricing?.completion ?? 0);
-      return {
-        id: m.id,
-        name: m.name || m.id,
-        contextLength: m.context_length ?? 0,
-        promptPricePer1M:
-          promptPerToken < 0
-            ? -1
-            : Number.isFinite(promptPerToken)
-              ? Number((promptPerToken * 1_000_000).toFixed(3))
-              : 0,
-        completionPricePer1M:
-          completionPerToken < 0
-            ? -1
-            : Number.isFinite(completionPerToken)
-              ? Number((completionPerToken * 1_000_000).toFixed(3))
-              : 0,
-      };
-    })
-    .sort((a, b) => {
-      const idxA = FEATURED_ORDER.indexOf(a.id);
-      const idxB = FEATURED_ORDER.indexOf(b.id);
-      if (idxA !== -1 && idxB !== -1) return idxA - idxB;
-      if (idxA !== -1) return -1;
-      if (idxB !== -1) return 1;
-      return a.name.localeCompare(b.name);
+    const query = new URLSearchParams({ provider: targetProvider });
+    if (baseUrl) query.set('baseUrl', baseUrl);
+    const res = await fetch(`./api/openrouter/models?${query.toString()}`, {
+      headers: getBackendFallbackHeaders(targetProvider),
     });
+    if (!res.ok) return def.fallbackModels;
+    const data = (await res.json()) as { models?: OpenRouterModel[] };
+    return data.models && data.models.length > 0 ? data.models : def.fallbackModels;
+  }
 
-  cachedStaticModels = { fetchedAt: now, models };
-  return models;
+  const activeKey = getActiveApiKey(targetProvider);
+  const cacheKey = `${targetProvider}|${baseUrl}|${activeKey ? 'auth' : 'pub'}`;
+  const now = Date.now();
+  const cached = cachedStaticModelsByProvider.get(cacheKey);
+  if (cached && now - cached.fetchedAt < 10 * 60 * 1000) {
+    return cached.models;
+  }
+
+  if (!activeKey && !def.supportsPublicModels && targetProvider !== 'custom') {
+    return def.fallbackModels;
+  }
+
+  try {
+    const headers: Record<string, string> = {};
+    if (targetProvider === 'anthropic') {
+      if (!activeKey) return def.fallbackModels;
+      headers['x-api-key'] = activeKey;
+      headers['anthropic-version'] = '2023-06-01';
+      headers['anthropic-dangerous-direct-browser-access'] = 'true';
+    } else if (activeKey) {
+      headers['Authorization'] = `Bearer ${activeKey}`;
+    }
+
+    const upstream = await fetch(`${baseUrl}/models`, { headers });
+    if (!upstream.ok) return def.fallbackModels;
+    const json = await upstream.json();
+    const models = normalizeModelsCatalogResponse(targetProvider, json);
+    const finalList = models.length > 0 ? models : def.fallbackModels;
+    cachedStaticModelsByProvider.set(cacheKey, { fetchedAt: now, models: finalList });
+    return finalList;
+  } catch {
+    return def.fallbackModels;
+  }
 }
 
 let lastRequestStartMs = 0;
@@ -626,11 +953,30 @@ async function paceOpenRouterCall(signal?: AbortSignal, minSpacingOverrideMs?: n
   lastRequestStartMs = Date.now();
 }
 
-function formatFriendlyRateLimitMessage(rawMessage: string): string {
+function formatFriendlyRateLimitMessage(rawMessage: string, providerId: ApiProviderId = memoryProvider): string {
   if (isEnglishUi()) {
-    return `Rate limit (requests per minute) reached: ${rawMessage} — Tip: Use the "Free Models Router" (rotates automatically across free providers) or pause Instant mode.`;
+    return providerId === 'openrouter'
+      ? `Rate limit (requests per minute) reached: ${rawMessage} — Tip: Use the "Free Models Router" (rotates automatically across free providers) or pause Instant mode.`
+      : `Rate limit (requests per minute) reached: ${rawMessage} — Tip: Pause Instant mode or adjust request spacing in Options.`;
   }
-  return `Anfrage-Limit (Requests pro Minute) erreicht: ${rawMessage} — Tipp: Nutze den „Free Models Router“ (wechselt automatisch zwischen freien Anbietern) oder pausiere den Sofort-Modus.`;
+  return providerId === 'openrouter'
+    ? `Anfrage-Limit (Requests pro Minute) erreicht: ${rawMessage} — Tipp: Nutze den „Free Models Router“ (wechselt automatisch zwischen freien Anbietern) oder pausiere den Sofort-Modus.`
+    : `Anfrage-Limit (Requests pro Minute) erreicht: ${rawMessage} — Tipp: Pausiere den Sofort-Modus oder erhöhe die Anfrage-Taktung in den Optionen.`;
+}
+
+function extractTextFromStaticJson(protocol: 'openai' | 'anthropic', json: unknown): string {
+  if (!json || typeof json !== 'object') return '';
+  if (protocol === 'anthropic') {
+    const blocks = (json as { content?: Array<{ type?: string; text?: string }> }).content;
+    if (!Array.isArray(blocks)) return '';
+    return blocks
+      .filter((b) => b.type === 'text' && typeof b.text === 'string')
+      .map((b) => b.text)
+      .join('')
+      .trim();
+  }
+  const choices = (json as { choices?: Array<{ message?: { content?: string } }> }).choices;
+  return choices?.[0]?.message?.content?.trim() || '';
 }
 
 export async function streamRewriteRequest(params: {
@@ -653,6 +999,8 @@ export async function streamRewriteRequest(params: {
   const hasBackend = await detectBackend();
   const activeSettings = params.preferences?.settings ?? memoryPreferences.settings;
   const MAX_RETRIES = Math.min(4, Math.max(0, activeSettings?.rateLimitRetries ?? 2));
+  const activeProvider = memoryProvider;
+  const def = getProviderDefinition(activeProvider);
 
   if (hasBackend) {
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
@@ -660,8 +1008,12 @@ export async function streamRewriteRequest(params: {
       const res = await fetch('./api/rewrite', {
         method: 'POST',
         signal: params.signal,
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...getBackendFallbackHeaders(activeProvider),
+        },
         body: JSON.stringify({
+          provider: activeProvider,
           text: params.text,
           task: params.task ?? 'rewrite',
           sourceLang: params.sourceLang,
@@ -690,7 +1042,7 @@ export async function streamRewriteRequest(params: {
             params.onRetryNotice?.(null);
             continue;
           }
-          return { ok: false, error: formatFriendlyRateLimitMessage(rawErr), isRateLimit: true };
+          return { ok: false, error: formatFriendlyRateLimitMessage(rawErr, activeProvider), isRateLimit: true };
         }
         return { ok: false, error: rawErr };
       }
@@ -726,7 +1078,7 @@ export async function streamRewriteRequest(params: {
               return {
                 ok: false,
                 error: isRateLimitErrorPayload(0, parsed.error)
-                  ? formatFriendlyRateLimitMessage(parsed.error)
+                  ? formatFriendlyRateLimitMessage(parsed.error, activeProvider)
                   : parsed.error,
                 isRateLimit: isRateLimitErrorPayload(0, parsed.error),
               };
@@ -753,7 +1105,7 @@ export async function streamRewriteRequest(params: {
         }
         return {
           ok: false,
-          error: formatFriendlyRateLimitMessage(streamRateLimitError),
+          error: formatFriendlyRateLimitMessage(streamRateLimitError, activeProvider),
           isRateLimit: true,
         };
       }
@@ -762,18 +1114,20 @@ export async function streamRewriteRequest(params: {
     }
   }
 
-  // Static Cloudflare / GitHub Pages direct OpenRouter streaming
-  if (!memoryApiKey) {
+  // Static Cloudflare / GitHub Pages direct multi-provider streaming
+  const activeKey = getActiveApiKey(activeProvider);
+  if (!activeKey && !def.optionalKey) {
     return {
       ok: false,
       error: isEnglishUi()
-        ? 'No OpenRouter API key configured.'
-        : 'Kein OpenRouter API-Schlüssel hinterlegt.',
+        ? `No ${def.name} API key configured.`
+        : `Kein ${def.name} API-Schlüssel hinterlegt.`,
     };
   }
 
-  const targetModel = params.model || memoryModel;
-  if (!memoryPaidUnlocked && !(await isStaticModelFree(targetModel))) {
+  const targetModel = params.model || getActiveModelForProvider(activeProvider);
+  const modelFree = await isStaticModelFree(targetModel, activeProvider);
+  if (shouldEnforceStaticPaidLock(modelFree, activeProvider)) {
     return {
       ok: false,
       error: isEnglishUi()
@@ -815,70 +1169,132 @@ export async function streamRewriteRequest(params: {
       }:\n"""\n${params.text}\n"""`
     : params.text;
 
-  const baseBody = {
-    model: targetModel,
-    stream: true,
-    temperature: promptConfig.temperature,
-    provider: memoryEnforceZdr
-      ? { sort: 'latency', zdr: true, data_collection: 'deny' }
-      : { sort: 'latency' },
-    messages: [
-      { role: 'system', content: promptConfig.system },
-      { role: 'user', content: userContent },
-    ],
-  };
+  const baseUrl = getActiveBaseUrl(activeProvider);
+  const isOpenRouter = activeProvider === 'openrouter';
+  let includeReasoningNone = isOpenRouter;
+  let includeTemperature = true;
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     await paceOpenRouterCall(params.signal);
 
-    let upstream = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      signal: params.signal,
-      headers: {
-        Authorization: `Bearer ${memoryApiKey}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': getReferer(),
-        'X-Title': 'ÜxzWrite & Translate',
-      },
-      body: JSON.stringify({ ...baseBody, reasoning: { effort: 'none' } }),
-    });
+    let upstream: Response;
+    if (def.protocol === 'anthropic') {
+      upstream = await fetch(`${baseUrl}/messages`, {
+        method: 'POST',
+        signal: params.signal,
+        headers: {
+          'x-api-key': activeKey,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: targetModel,
+          max_tokens: 8192,
+          stream: true,
+          temperature: Math.min(1, Math.max(0, promptConfig.temperature)),
+          system: promptConfig.system,
+          messages: [{ role: 'user', content: userContent }],
+        }),
+      });
+    } else {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (activeKey) headers['Authorization'] = `Bearer ${activeKey}`;
+      if (isOpenRouter) {
+        headers['HTTP-Referer'] = getReferer();
+        headers['X-Title'] = 'uxz Write & Translate';
+      }
 
-    if (upstream.status === 400) {
-      const preview = await upstream.text().catch(() => '');
-      if (/reasoning|effort/i.test(preview)) {
-        upstream = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-          method: 'POST',
-          signal: params.signal,
-          headers: {
-            Authorization: `Bearer ${memoryApiKey}`,
-            'Content-Type': 'application/json',
-            'HTTP-Referer': getReferer(),
-            'X-Title': 'ÜxzWrite & Translate',
-          },
-          body: JSON.stringify(baseBody),
-        });
-      } else {
-        let message = 'OpenRouter-Fehler (HTTP 400)';
-        try {
-          const parsed = JSON.parse(preview) as { error?: { message?: string } };
-          if (parsed?.error?.message) message = parsed.error.message;
-        } catch {
-          if (preview) message = `${message}: ${preview.slice(0, 240)}`;
+      const buildBody = () => {
+        const body: Record<string, unknown> = {
+          model: targetModel,
+          stream: true,
+          messages: [
+            { role: 'system', content: promptConfig.system },
+            { role: 'user', content: userContent },
+          ],
+        };
+        if (includeTemperature) body.temperature = promptConfig.temperature;
+        if (isOpenRouter) {
+          body.provider = memoryEnforceZdr
+            ? { sort: 'latency', zdr: true, data_collection: 'deny' }
+            : { sort: 'latency' };
+          if (includeReasoningNone) body.reasoning = { effort: 'none' };
         }
-        return { ok: false, error: message };
+        return body;
+      };
+
+      upstream = await fetch(`${baseUrl}/chat/completions`, {
+        method: 'POST',
+        signal: params.signal,
+        headers,
+        body: JSON.stringify(buildBody()),
+      });
+
+      if (upstream.status === 400) {
+        const preview = await upstream.text().catch(() => '');
+        if (includeReasoningNone && /reasoning|effort/i.test(preview)) {
+          includeReasoningNone = false;
+          upstream = await fetch(`${baseUrl}/chat/completions`, {
+            method: 'POST',
+            signal: params.signal,
+            headers,
+            body: JSON.stringify(buildBody()),
+          });
+        } else if (includeTemperature && /temperature/i.test(preview)) {
+          includeTemperature = false;
+          upstream = await fetch(`${baseUrl}/chat/completions`, {
+            method: 'POST',
+            signal: params.signal,
+            headers,
+            body: JSON.stringify(buildBody()),
+          });
+        } else {
+          let message = `${def.name} (HTTP 400)`;
+          try {
+            const parsed = JSON.parse(preview) as { error?: { message?: string } };
+            if (parsed?.error?.message) message = parsed.error.message;
+          } catch {
+            if (preview) message = `${message}: ${preview.slice(0, 240)}`;
+          }
+          return { ok: false, error: message };
+        }
       }
     }
 
     if (!upstream.ok || !upstream.body) {
       const errBody = await upstream.text().catch(() => '');
-      let message = `OpenRouter-Fehler (HTTP ${upstream.status})`;
+      let message = `${def.name} (HTTP ${upstream.status})`;
       try {
         const parsed = JSON.parse(errBody) as { error?: { message?: string } };
         if (parsed?.error?.message) message = parsed.error.message;
       } catch {
         if (errBody) message = `${message}: ${errBody.slice(0, 240)}`;
       }
-      const isRl = isRateLimitErrorPayload(upstream.status, message) || upstream.status === 503;
+      if (upstream.status === 401 || /missing auth|authentication header|no cookie auth/i.test(message)) {
+        if (isOpenRouter && targetModel === 'openrouter/free' && attempt < MAX_RETRIES && activeKey) {
+          const keyOk = await fetch('https://openrouter.ai/api/v1/auth/key', {
+            signal: params.signal,
+            headers: { Authorization: `Bearer ${activeKey}` },
+          })
+            .then((r) => r.ok)
+            .catch(() => false);
+          if (keyOk) {
+            await abortableSleep(600, params.signal);
+            continue;
+          }
+        }
+        return {
+          ok: false,
+          error: isEnglishUi()
+            ? `${def.name} authentication failed (${message}). Please re-check your ${def.name} API key in the API drawer.`
+            : `${def.name} Authentifizierung fehlgeschlagen (${message}). Bitte prüfe deinen ${def.name} API-Schlüssel im API-Menü.`,
+        };
+      }
+      const isRl =
+        isRateLimitErrorPayload(upstream.status, message) ||
+        upstream.status === 503 ||
+        upstream.status === 529;
       if (isRl) {
         rateLimitCooldownUntilMs = Date.now() + 25000;
         if (attempt < MAX_RETRIES) {
@@ -890,7 +1306,7 @@ export async function streamRewriteRequest(params: {
         }
         return {
           ok: false,
-          error: formatFriendlyRateLimitMessage(message),
+          error: formatFriendlyRateLimitMessage(message, activeProvider),
           isRateLimit: true,
         };
       }
@@ -916,26 +1332,56 @@ export async function streamRewriteRequest(params: {
         const payload = line.slice(5).trim();
         if (payload === '[DONE]') continue;
         try {
-          const parsed = JSON.parse(payload) as {
-            choices?: Array<{ delta?: { content?: string } }>;
-            error?: { message?: string };
-          };
-          if (parsed.error?.message) {
-            const isRl = isRateLimitErrorPayload(0, parsed.error.message);
-            if (!accumulated && isRl) {
-              streamRateLimitError = parsed.error.message;
-              break;
-            }
-            return {
-              ok: false,
-              error: isRl ? formatFriendlyRateLimitMessage(parsed.error.message) : parsed.error.message,
-              isRateLimit: isRl,
+          if (def.protocol === 'anthropic') {
+            const parsed = JSON.parse(payload) as {
+              type?: string;
+              delta?: { type?: string; text?: string };
+              error?: { message?: string };
             };
-          }
-          const delta = parsed.choices?.[0]?.delta?.content;
-          if (typeof delta === 'string' && delta.length > 0) {
-            accumulated += delta;
-            params.onDelta(accumulated);
+            if (parsed.type === 'error' || parsed.error?.message) {
+              const msg = parsed.error?.message || 'Anthropic Stream Error';
+              const isRl = isRateLimitErrorPayload(0, msg);
+              if (!accumulated && isRl) {
+                streamRateLimitError = msg;
+                break;
+              }
+              return {
+                ok: false,
+                error: isRl ? formatFriendlyRateLimitMessage(msg, activeProvider) : msg,
+                isRateLimit: isRl,
+              };
+            }
+            if (
+              parsed.type === 'content_block_delta' &&
+              parsed.delta?.type === 'text_delta' &&
+              typeof parsed.delta.text === 'string' &&
+              parsed.delta.text.length > 0
+            ) {
+              accumulated += parsed.delta.text;
+              params.onDelta(accumulated);
+            }
+          } else {
+            const parsed = JSON.parse(payload) as {
+              choices?: Array<{ delta?: { content?: string } }>;
+              error?: { message?: string };
+            };
+            if (parsed.error?.message) {
+              const isRl = isRateLimitErrorPayload(0, parsed.error.message);
+              if (!accumulated && isRl) {
+                streamRateLimitError = parsed.error.message;
+                break;
+              }
+              return {
+                ok: false,
+                error: isRl ? formatFriendlyRateLimitMessage(parsed.error.message, activeProvider) : parsed.error.message,
+                isRateLimit: isRl,
+              };
+            }
+            const delta = parsed.choices?.[0]?.delta?.content;
+            if (typeof delta === 'string' && delta.length > 0) {
+              accumulated += delta;
+              params.onDelta(accumulated);
+            }
           }
         } catch {
           // Ignore partial keepalive frames
@@ -955,7 +1401,7 @@ export async function streamRewriteRequest(params: {
       }
       return {
         ok: false,
-        error: formatFriendlyRateLimitMessage(streamRateLimitError),
+        error: formatFriendlyRateLimitMessage(streamRateLimitError, activeProvider),
         isRateLimit: true,
       };
     }
@@ -980,14 +1426,19 @@ export async function fetchSentenceAlternatives(params: {
 }): Promise<{ ok: true; alternatives: string[] } | { ok: false; error: string; isRateLimit?: boolean }> {
   const hasBackend = await detectBackend();
   const MAX_RETRIES = 1;
+  const activeProvider = memoryProvider;
+  const def = getProviderDefinition(activeProvider);
 
   if (hasBackend) {
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       await paceOpenRouterCall(undefined);
       const res = await fetch('./api/alternatives', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(params),
+        headers: {
+          'Content-Type': 'application/json',
+          ...getBackendFallbackHeaders(activeProvider),
+        },
+        body: JSON.stringify({ ...params, provider: activeProvider }),
       });
       const data = (await res.json().catch(() => ({}))) as { alternatives?: string[]; error?: string };
       if (!res.ok) {
@@ -1002,7 +1453,7 @@ export async function fetchSentenceAlternatives(params: {
           }
           return {
             ok: false,
-            error: formatFriendlyRateLimitMessage(rawErr),
+            error: formatFriendlyRateLimitMessage(rawErr, activeProvider),
             isRateLimit: true,
           };
         }
@@ -1010,20 +1461,22 @@ export async function fetchSentenceAlternatives(params: {
       }
       return { ok: true, alternatives: data.alternatives ?? [] };
     }
-    return { ok: false, error: formatFriendlyRateLimitMessage('HTTP 429'), isRateLimit: true };
+    return { ok: false, error: formatFriendlyRateLimitMessage('HTTP 429', activeProvider), isRateLimit: true };
   }
 
-  if (!memoryApiKey) {
+  const activeKey = getActiveApiKey(activeProvider);
+  if (!activeKey && !def.optionalKey) {
     return {
       ok: false,
       error: isEnglishUi()
-        ? 'No OpenRouter API key configured.'
-        : 'Kein OpenRouter API-Schlüssel hinterlegt.',
+        ? `No ${def.name} API key configured.`
+        : `Kein ${def.name} API-Schlüssel hinterlegt.`,
     };
   }
 
-  const targetModel = params.model || memoryModel;
-  if (!memoryPaidUnlocked && !(await isStaticModelFree(targetModel))) {
+  const targetModel = params.model || getActiveModelForProvider(activeProvider);
+  const modelFree = await isStaticModelFree(targetModel, activeProvider);
+  if (shouldEnforceStaticPaidLock(modelFree, activeProvider)) {
     return {
       ok: false,
       error: isEnglishUi()
@@ -1045,74 +1498,111 @@ export async function fetchSentenceAlternatives(params: {
         ? 'Variiere nur minimal und bleibe eng am ursprünglichen Tonfall.'
         : STYLE_INSTRUCTIONS[params.style] || STYLE_INSTRUCTIONS.ausgewogen;
 
-  const payload = {
-    model: params.model || memoryModel,
-    temperature: 0.7,
-    provider: memoryEnforceZdr
-      ? { sort: 'latency', zdr: true, data_collection: 'deny' }
-      : { sort: 'latency' },
-    messages: [
-      {
-        role: 'system',
-        content: [
-          task === 'translate'
-            ? 'Du lieferst genau 3 alternative Übersetzungsvarianten für einen markierten Satz im Zieltext.'
-            : 'Du lieferst genau 3 alternative Formulierungen für einen markierten Satz im Textkontext.',
-          langRule,
-          `Stilvorgabe: ${styleHint}`,
-          ...(customBlock ? [customBlock] : []),
-          'Antworte ausschließlich als gültiges JSON-Objekt im Format: {"alternatives": ["...", "...", "..."]}. Keine Markdown-Codeblöcke, kein Begleittext.',
-        ].join('\n'),
-      },
-      {
-        role: 'user',
-        content: `Gesamtkontext:\n${params.fullText}\n\nZu variierender Satz:\n${params.sentence}`,
-      },
-    ],
-  };
+  const systemPrompt = [
+    task === 'translate'
+      ? 'Du lieferst genau 3 alternative Übersetzungsvarianten für einen markierten Satz im Zieltext.'
+      : 'Du lieferst genau 3 alternative Formulierungen für einen markierten Satz im Textkontext.',
+    langRule,
+    `Stilvorgabe: ${styleHint}`,
+    ...(customBlock ? [customBlock] : []),
+    'Antworte ausschließlich als gültiges JSON-Objekt im Format: {"alternatives": ["...", "...", "..."]}. Keine Markdown-Codeblöcke, kein Begleittext.',
+  ].join('\n');
+  const userContent = `Gesamtkontext:\n${params.fullText}\n\nZu variierender Satz:\n${params.sentence}`;
+
+  const baseUrl = getActiveBaseUrl(activeProvider);
+  const isOpenRouter = activeProvider === 'openrouter';
+  let includeReasoningNone = isOpenRouter;
+  let includeTemperature = true;
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     await paceOpenRouterCall(undefined);
 
-    let upstream = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${memoryApiKey}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': getReferer(),
-        'X-Title': 'ÜxzWrite & Translate',
-      },
-      body: JSON.stringify({ ...payload, reasoning: { effort: 'none' } }),
-    });
+    let upstream: Response;
+    if (def.protocol === 'anthropic') {
+      upstream = await fetch(`${baseUrl}/messages`, {
+        method: 'POST',
+        headers: {
+          'x-api-key': activeKey,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: targetModel,
+          max_tokens: 1024,
+          stream: false,
+          temperature: 0.7,
+          system: systemPrompt,
+          messages: [{ role: 'user', content: userContent }],
+        }),
+      });
+    } else {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (activeKey) headers['Authorization'] = `Bearer ${activeKey}`;
+      if (isOpenRouter) {
+        headers['HTTP-Referer'] = getReferer();
+        headers['X-Title'] = 'uxz Write & Translate';
+      }
 
-    if (upstream.status === 400) {
-      const preview = await upstream.text().catch(() => '');
-      if (/reasoning|effort/i.test(preview)) {
-        upstream = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${memoryApiKey}`,
-            'Content-Type': 'application/json',
-            'HTTP-Referer': getReferer(),
-            'X-Title': 'ÜxzWrite & Translate',
-          },
-          body: JSON.stringify(payload),
-        });
-      } else {
-        return { ok: false, error: `Alternativen fehlgeschlagen (HTTP 400).` };
+      const buildBody = () => {
+        const body: Record<string, unknown> = {
+          model: targetModel,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userContent },
+          ],
+        };
+        if (includeTemperature) body.temperature = 0.7;
+        if (isOpenRouter) {
+          body.provider = memoryEnforceZdr
+            ? { sort: 'latency', zdr: true, data_collection: 'deny' }
+            : { sort: 'latency' };
+          if (includeReasoningNone) body.reasoning = { effort: 'none' };
+        }
+        return body;
+      };
+
+      upstream = await fetch(`${baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(buildBody()),
+      });
+
+      if (upstream.status === 400) {
+        const preview = await upstream.text().catch(() => '');
+        if (includeReasoningNone && /reasoning|effort/i.test(preview)) {
+          includeReasoningNone = false;
+          upstream = await fetch(`${baseUrl}/chat/completions`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(buildBody()),
+          });
+        } else if (includeTemperature && /temperature/i.test(preview)) {
+          includeTemperature = false;
+          upstream = await fetch(`${baseUrl}/chat/completions`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(buildBody()),
+          });
+        } else {
+          return { ok: false, error: `Alternativen fehlgeschlagen (HTTP 400).` };
+        }
       }
     }
 
     if (!upstream.ok) {
       const errBody = await upstream.text().catch(() => '');
-      let message = `OpenRouter-Fehler (HTTP ${upstream.status})`;
+      let message = `${def.name} (HTTP ${upstream.status})`;
       try {
         const parsed = JSON.parse(errBody) as { error?: { message?: string } };
         if (parsed?.error?.message) message = parsed.error.message;
       } catch {
         if (errBody) message = `${message}: ${errBody.slice(0, 200)}`;
       }
-      const isRl = isRateLimitErrorPayload(upstream.status, message) || upstream.status === 503;
+      const isRl =
+        isRateLimitErrorPayload(upstream.status, message) ||
+        upstream.status === 503 ||
+        upstream.status === 529;
       if (isRl) {
         rateLimitCooldownUntilMs = Date.now() + 25000;
         if (attempt < MAX_RETRIES) {
@@ -1122,17 +1612,15 @@ export async function fetchSentenceAlternatives(params: {
         }
         return {
           ok: false,
-          error: formatFriendlyRateLimitMessage(message),
+          error: formatFriendlyRateLimitMessage(message, activeProvider),
           isRateLimit: true,
         };
       }
       return { ok: false, error: `Alternativen fehlgeschlagen (HTTP ${upstream.status}).` };
     }
 
-    const json = (await upstream.json()) as {
-      choices?: Array<{ message?: { content?: string } }>;
-    };
-    const raw = json.choices?.[0]?.message?.content?.trim() || '';
+    const json = await upstream.json();
+    const raw = extractTextFromStaticJson(def.protocol, json);
     const cleaned = raw.replace(/^```json\s*/i, '').replace(/```$/i, '').trim();
 
     let alternatives: string[] = [];
@@ -1154,7 +1642,7 @@ export async function fetchSentenceAlternatives(params: {
     return { ok: true, alternatives };
   }
 
-  return { ok: false, error: formatFriendlyRateLimitMessage('HTTP 429'), isRateLimit: true };
+  return { ok: false, error: formatFriendlyRateLimitMessage('HTTP 429', activeProvider), isRateLimit: true };
 }
 
 export async function analyzeChangesRequest(params: {
@@ -1170,14 +1658,21 @@ export async function analyzeChangesRequest(params: {
 
   const hasBackend = await detectBackend();
   const analyzeSpacing = Math.max(500, memoryPreferences.settings?.minRequestSpacingMs ?? 450);
+  const activeProvider = memoryProvider;
+  const def = getProviderDefinition(activeProvider);
 
   if (hasBackend) {
     await paceOpenRouterCall(params.signal, analyzeSpacing);
     const res = await fetch('./api/analyze-changes', {
       method: 'POST',
       signal: params.signal,
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...getBackendFallbackHeaders(activeProvider),
+      },
       body: JSON.stringify({
+        provider: activeProvider,
+        model: params.model,
         sourceText: params.sourceText,
         refinedText: params.refinedText,
         hunks: params.hunks,
@@ -1194,9 +1689,11 @@ export async function analyzeChangesRequest(params: {
     return data.classifications ?? [];
   }
 
-  if (!memoryApiKey) return [];
-  const targetModel = params.model || memoryModel;
-  if (!memoryPaidUnlocked && !(await isStaticModelFree(targetModel))) return [];
+  const activeKey = getActiveApiKey(activeProvider);
+  if (!activeKey && !def.optionalKey) return [];
+  const targetModel = params.model || getActiveModelForProvider(activeProvider);
+  const modelFree = await isStaticModelFree(targetModel, activeProvider);
+  if (shouldEnforceStaticPaidLock(modelFree, activeProvider)) return [];
 
   await paceOpenRouterCall(params.signal, analyzeSpacing);
 
@@ -1206,81 +1703,109 @@ export async function analyzeChangesRequest(params: {
     after: h.after.trim(),
   }));
 
-  const payload = {
-    model: params.model || memoryModel,
-    temperature: 0,
-    provider: memoryEnforceZdr
-      ? { sort: 'latency', zdr: true, data_collection: 'deny' }
-      : { sort: 'latency' },
-    messages: [
-      {
-        role: 'system',
-        content: [
-          'Klassifiziere linguistische Textänderungen präzise in genau eine der folgenden Kategorien:',
-          '- "rechtschreibung": Tippfehler, Buchstabendreher, Getrennt-/Zusammenschreibung, Groß-/Kleinschreibung, orthografische Fehler.',
-          '- "grammatik": Kasus, Tempus, Genus, Numerus, Verbkonjugation, Kongruenz, Satzstellung/Syntaxfehler, fehlende/falsche Artikel oder Präpositionen.',
-          '- "zeichensetzung": Kommas, Punkte, Anführungszeichen, Bindestriche, Satzzeichen.',
-          '- "stil": Stilistische Umformulierung, Wortwahl, Tonalität, Registerwechsel, eleganterer oder umgangssprachlicher Ausdruck.',
-          '- "klarheit": Verdichtung, Streichung von Füllwörtern/Redundanz, verbesserte Verständlichkeit.',
-          isEnglishUi()
-            ? 'For each entry, provide a concise English reason (max. 5 words).'
-            : 'Gib zu jedem Eintrag außerdem eine knappe deutsche Begründung (max. 5 Wörter).',
-          'Antworte ausschließlich als gültiges JSON-Objekt ohne Markdown-Codeblock:',
-          '{"classifications":[{"id":"...","category":"rechtschreibung|grammatik|zeichensetzung|stil|klarheit","reason":"..."}]}',
-        ].join('\n'),
-      },
-      {
-        role: 'user',
-        content: JSON.stringify({
-          sourcePreview: params.sourceText.slice(0, 1500),
-          refinedPreview: params.refinedText.slice(0, 1500),
-          changes: compactHunks,
-        }),
-      },
-    ],
-  };
+  const systemPrompt = [
+    'Klassifiziere linguistische Textänderungen präzise in genau eine der folgenden Kategorien:',
+    '- "rechtschreibung": Tippfehler, Buchstabendreher, Getrennt-/Zusammenschreibung, Groß-/Kleinschreibung, orthografische Fehler.',
+    '- "grammatik": Kasus, Tempus, Genus, Numerus, Verbkonjugation, Kongruenz, Satzstellung/Syntaxfehler, fehlende/falsche Artikel oder Präpositionen.',
+    '- "zeichensetzung": Kommas, Punkte, Anführungszeichen, Bindestriche, Satzzeichen.',
+    '- "stil": Stilistische Umformulierung, Wortwahl, Tonalität, Registerwechsel, eleganterer oder umgangssprachlicher Ausdruck.',
+    '- "klarheit": Verdichtung, Streichung von Füllwörtern/Redundanz, verbesserte Verständlichkeit.',
+    isEnglishUi()
+      ? 'For each entry, provide a concise English reason (max. 5 words).'
+      : 'Gib zu jedem Eintrag außerdem eine knappe deutsche Begründung (max. 5 Wörter).',
+    'Antworte ausschließlich als gültiges JSON-Objekt ohne Markdown-Codeblock:',
+    '{"classifications":[{"id":"...","category":"rechtschreibung|grammatik|zeichensetzung|stil|klarheit","reason":"..."}]}',
+  ].join('\n');
 
-  let upstream = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-    method: 'POST',
-    signal: params.signal,
-    headers: {
-      Authorization: `Bearer ${memoryApiKey}`,
-      'Content-Type': 'application/json',
-      'HTTP-Referer': getReferer(),
-      'X-Title': 'ÜxzWrite & Translate',
-    },
-    body: JSON.stringify({ ...payload, reasoning: { effort: 'none' } }),
+  const userContent = JSON.stringify({
+    sourcePreview: params.sourceText.slice(0, 1500),
+    refinedPreview: params.refinedText.slice(0, 1500),
+    changes: compactHunks,
   });
 
-  if (upstream.status === 400) {
-    const preview = await upstream.text().catch(() => '');
-    if (/reasoning|effort/i.test(preview)) {
-      upstream = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        signal: params.signal,
-        headers: {
-          Authorization: `Bearer ${memoryApiKey}`,
-          'Content-Type': 'application/json',
-          'HTTP-Referer': getReferer(),
-          'X-Title': 'ÜxzWrite & Translate',
-        },
-        body: JSON.stringify(payload),
-      });
-    } else {
-      return [];
+  const baseUrl = getActiveBaseUrl(activeProvider);
+  const isOpenRouter = activeProvider === 'openrouter';
+  let upstream: Response;
+
+  if (def.protocol === 'anthropic') {
+    upstream = await fetch(`${baseUrl}/messages`, {
+      method: 'POST',
+      signal: params.signal,
+      headers: {
+        'x-api-key': activeKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: targetModel,
+        max_tokens: 2048,
+        stream: false,
+        temperature: 0,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userContent }],
+      }),
+    });
+  } else {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (activeKey) headers['Authorization'] = `Bearer ${activeKey}`;
+    if (isOpenRouter) {
+      headers['HTTP-Referer'] = getReferer();
+      headers['X-Title'] = 'uxz Write & Translate';
+    }
+
+    const baseBody: Record<string, unknown> = {
+      model: targetModel,
+      temperature: 0,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userContent },
+      ],
+    };
+    if (isOpenRouter) {
+      baseBody.provider = memoryEnforceZdr
+        ? { sort: 'latency', zdr: true, data_collection: 'deny' }
+        : { sort: 'latency' };
+    }
+
+    upstream = await fetch(`${baseUrl}/chat/completions`, {
+      method: 'POST',
+      signal: params.signal,
+      headers,
+      body: JSON.stringify(isOpenRouter ? { ...baseBody, reasoning: { effort: 'none' } } : baseBody),
+    });
+
+    if (upstream.status === 400) {
+      const preview = await upstream.text().catch(() => '');
+      if (/reasoning|effort/i.test(preview)) {
+        upstream = await fetch(`${baseUrl}/chat/completions`, {
+          method: 'POST',
+          signal: params.signal,
+          headers,
+          body: JSON.stringify(baseBody),
+        });
+      } else if (/temperature/i.test(preview)) {
+        delete baseBody.temperature;
+        upstream = await fetch(`${baseUrl}/chat/completions`, {
+          method: 'POST',
+          signal: params.signal,
+          headers,
+          body: JSON.stringify(baseBody),
+        });
+      } else {
+        return [];
+      }
     }
   }
 
-  if (upstream.status === 429 || upstream.status === 503) {
+  if (upstream.status === 429 || upstream.status === 503 || upstream.status === 529) {
     rateLimitCooldownUntilMs = Date.now() + 25000;
     return [];
   }
 
   if (!upstream.ok) return [];
-  const json = (await upstream.json()) as {
-    choices?: Array<{ message?: { content?: string } }>;
-  };
-  const raw = json.choices?.[0]?.message?.content?.trim() || '';
+  const json = await upstream.json();
+  const raw = extractTextFromStaticJson(def.protocol, json);
   const cleaned = raw.replace(/^```json\s*/i, '').replace(/```$/i, '').trim();
   const allowed = new Set(['rechtschreibung', 'grammatik', 'zeichensetzung', 'stil', 'klarheit']);
 
@@ -1428,6 +1953,11 @@ export async function clearAllLocalData(): Promise<{
 }> {
   [
     STORAGE_KEY_API_KEY,
+    STORAGE_KEY_PROVIDER,
+    STORAGE_KEY_PROVIDER_KEYS,
+    STORAGE_KEY_MODELS_BY_PROVIDER,
+    STORAGE_KEY_SECONDARY_BY_PROVIDER,
+    STORAGE_KEY_BASE_URLS_BY_PROVIDER,
     STORAGE_KEY_MODEL,
     STORAGE_KEY_SECONDARY_MODEL,
     STORAGE_KEY_DUAL,
@@ -1438,10 +1968,12 @@ export async function clearAllLocalData(): Promise<{
     STORAGE_KEY_UI_LANG,
   ].forEach(removeStoredString);
 
-  memoryApiKey = '';
-  memoryModel = DEFAULT_MODEL;
+  memoryProvider = 'openrouter';
+  memoryProviderKeys = {};
+  memoryModelsByProvider = {};
+  memorySecondaryByProvider = {};
+  memoryBaseUrlsByProvider = {};
   memoryDualReviewEnabled = false;
-  memorySecondaryModel = DEFAULT_MODEL;
   memoryEnforceZdr = false;
   memoryKeyInfo = null;
   memoryPaidUnlocked = false;
@@ -1461,11 +1993,12 @@ export async function clearAllLocalData(): Promise<{
   const hasBackend = await detectBackend();
   if (hasBackend) {
     await Promise.allSettled([
-      fetch('./api/openrouter/config', { method: 'DELETE' }),
+      fetch('./api/openrouter/config?all=true', { method: 'DELETE' }),
       fetch('./api/openrouter/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          provider: 'openrouter',
           model: DEFAULT_MODEL,
           dualReviewEnabled: false,
           secondaryModel: DEFAULT_MODEL,

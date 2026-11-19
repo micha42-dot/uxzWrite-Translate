@@ -91,9 +91,9 @@ export function PrivacyView({
               tracking pixels, ad networks, or user accounts.
             </p>
             <p className="text-xs text-neutral-600 dark:text-neutral-400">
-              In full-stack Node server mode (when self-hosted via Express), user-entered OpenRouter API keys are
-              only kept encrypted inside an <span className="font-mono">HttpOnly</span> cookie (AES-256-GCM) and
-              are never logged or stored in a database.
+              In full-stack Node server mode (when self-hosted via Express), user-entered provider API keys and custom
+              endpoints are only kept encrypted inside an <span className="font-mono">HttpOnly</span> cookie
+              (AES-256-GCM) and are never logged or stored in a database.
             </p>
           </div>
         ) : (
@@ -105,7 +105,7 @@ export function PrivacyView({
             </p>
             <p className="text-xs text-neutral-600 dark:text-neutral-400">
               Wird die Anwendung im Node-Server-Modus selbst betrieben, verbleiben manuell hinterlegte
-              OpenRouter-API-Keys lediglich AES-256-GCM-verschlüsselt in einem{' '}
+              API-Schlüssel und eigene Endpunkt-URLs lediglich AES-256-GCM-verschlüsselt in einem{' '}
               <span className="font-mono">HttpOnly</span>-Cookie und werden nicht protokolliert oder in einer
               Datenbank abgelegt.
             </p>
@@ -178,16 +178,16 @@ export function PrivacyView({
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
           {[
             {
-              key: 'uxz_openrouter_key',
+              key: 'uxz_provider / uxz_provider_keys / uxz_base_urls_by_provider',
               desc: isEn
-                ? 'Your personal OpenRouter API key (optional, stored only if entered).'
-                : 'Dein persönlicher OpenRouter-API-Key (optional, nur bei Eingabe).',
+                ? 'Active AI provider, your saved per-provider API keys, and custom/EU endpoint URLs (optional, stored only if entered).'
+                : 'Aktiver KI-Anbieter, hinterlegte API-Schlüssel je Anbieter sowie eigene bzw. EU-Endpunkt-URLs (nur bei Eingabe).',
             },
             {
-              key: 'uxz_model / uxz_secondary_model / uxz_dual_review / uxz_enforce_zdr',
+              key: 'uxz_models_by_provider / uxz_secondary_models_by_provider / openrouter_enforce_zdr',
               desc: isEn
-                ? 'Selected primary & review models, Two-Person Review toggle, and Zero Data Retention setting.'
-                : 'Gewählte Primär- und Prüfmodelle, Zwei-Augen-Prinzip sowie ZDR-Schalter.',
+                ? 'Selected primary & review models per provider, Two-Person Review toggle, and OpenRouter Zero Data Retention setting.'
+                : 'Gewählte Primär- und Prüfmodelle je Anbieter, Zwei-Augen-Prinzip sowie ZDR-Schalter für OpenRouter.',
             },
             {
               key: 'uxz_writing_preferences',
@@ -302,46 +302,42 @@ export function PrivacyView({
         )}
       </section>
 
-      {/* 4. OpenRouter */}
+      {/* 4. Selected API Provider / Router */}
       <section className="rounded-lg border border-neutral-300/90 dark:border-neutral-800 bg-white dark:bg-[#0C1019] p-5 sm:p-6 space-y-3 shadow-2xs">
         <div className="flex items-center gap-2.5">
           <Globe className="w-4 h-4 text-neutral-700 dark:text-neutral-300 shrink-0" />
           <h2 className="text-sm font-semibold text-neutral-950 dark:text-white">
             {isEn
-              ? '4. API Gateway: OpenRouter (openrouter.ai)'
-              : '4. API-Router: OpenRouter (openrouter.ai)'}
+              ? '4. Chosen AI API Provider, Router or Local Endpoint'
+              : '4. Gewählter KI-API-Anbieter, Router oder lokaler Endpunkt'}
           </h2>
         </div>
         {isEn ? (
           <div className="text-sm leading-relaxed text-neutral-700 dark:text-neutral-300 space-y-2">
             <p>
-              Whenever you refine, verify, analyze, or translate text (or load available models), your browser — or the
-              Node backend — connects to <span className="font-mono text-xs">https://openrouter.ai/api/v1</span> using
-              your configured OpenRouter API key.
+              Whenever you refine, verify, analyze, or translate text, your browser (or the Express server) connects{' '}
+              <strong>only to the single API provider you actively selected</strong>:
             </p>
             <ul className="list-disc pl-5 space-y-1 text-xs text-neutral-600 dark:text-neutral-400">
               <li>
-                <strong>Transmitted Content:</strong> Your submitted text, selected language/style/tone, active glossary
-                terms and custom rules, plus your API key (in the{' '}
-                <span className="font-mono">Authorization</span> header).
+                <strong>Multi-Model Routers:</strong> OpenRouter (<span className="font-mono">openrouter.ai</span>),
+                Requesty Global / EU GDPR endpoint (<span className="font-mono">router.eu.requesty.ai</span>), Hugging
+                Face Inference Router, Together AI, Groq, or Cerebras.
               </li>
               <li>
-                <strong>Metadata &amp; Billing Logs:</strong> OpenRouter logs request metadata (timestamps, selected model,
-                token counts, costs, latency) to handle billing and rate limits for your account.
+                <strong>Direct First-Party APIs:</strong> Anthropic (Claude), OpenAI, Mistral AI (EU / Paris), DeepSeek,
+                Google Gemini, or xAI (Grok).
               </li>
               <li>
-                <strong>Prompt Logging &amp; Privacy Settings:</strong> By default, OpenRouter states that it does not
-                store prompt/completion bodies unless you explicitly enable prompt logging in your OpenRouter account
-                settings. See the{' '}
-                <a
-                  href="https://openrouter.ai/privacy"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="underline underline-offset-4 text-neutral-900 dark:text-neutral-100"
-                >
-                  OpenRouter Privacy Policy
-                </a>
-                .
+                <strong>Local / Custom Endpoint:</strong> Your own local inference server (such as{' '}
+                <span className="font-mono">http://localhost:11434/v1</span> for Ollama or LM Studio), where text never
+                leaves your machine.
+              </li>
+              <li>
+                <strong>Transmitted Content &amp; Logs:</strong> Your submitted text, language/style/tone instructions,
+                active glossary terms, custom rules, and API credential header are transmitted to that chosen endpoint.
+                Commercial routers &amp; direct APIs log billing metadata (timestamps, token counts, model ID) and handle
+                prompt retention under their own API terms (most paid APIs do not train on API traffic by default).
               </li>
             </ul>
           </div>
@@ -349,70 +345,67 @@ export function PrivacyView({
           <div className="text-sm leading-relaxed text-neutral-700 dark:text-neutral-300 space-y-2">
             <p>
               Sobald du Text verfeinerst, nachprüfst, übersetzt oder die Modellliste abrufst, verbindet sich dein Browser
-              (bzw. im Server-Modus das Backend) mit <span className="font-mono text-xs">https://openrouter.ai/api/v1</span>.
+              (bzw. im Server-Modus das Backend) ausschließlich mit{' '}
+              <strong>dem von dir aktiv gewählten KI-Anbieter oder Endpunkt</strong>:
             </p>
             <ul className="list-disc pl-5 space-y-1 text-xs text-neutral-600 dark:text-neutral-400">
               <li>
-                <strong>Übertragene Inhalte:</strong> Dein eingegebener Text, die gewählte Sprache/Stil/Ton-Einstellung,
-                deine aktiven Wörterbuch-Begriffe und Schreibregeln sowie dein API-Schlüssel im{' '}
-                <span className="font-mono">Authorization</span>-Header.
+                <strong>Multi-Modell-Router:</strong> OpenRouter (<span className="font-mono">openrouter.ai</span>),
+                Requesty Global / EU-DSGVO-Endpunkt (<span className="font-mono">router.eu.requesty.ai</span>), Hugging
+                Face Inference Router, Together AI, Groq oder Cerebras.
               </li>
               <li>
-                <strong>Metadaten &amp; Abrechnung:</strong> OpenRouter protokolliert technische Metadaten wie
-                Zeitstempel, Modell-ID, Token-Verbrauch, Kosten und Latenz zur Abrechnung und Rate-Limit-Steuerung in
-                deinem Konto.
+                <strong>Direkte Erst-Anbieter-APIs:</strong> Anthropic (Claude), OpenAI, Mistral AI (EU / Paris),
+                DeepSeek, Google Gemini oder xAI (Grok).
               </li>
               <li>
-                <strong>Prompt-Speicherung:</strong> Laut OpenRouter werden Prompt- und Antwortinhalte standardmäßig nicht
-                dauerhaft gespeichert, sofern Prompt-Logging im OpenRouter-Konto nicht aktiv eingeschaltet wurde. Details
-                regelt die{' '}
-                <a
-                  href="https://openrouter.ai/privacy"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="underline underline-offset-4 text-neutral-900 dark:text-neutral-100"
-                >
-                  OpenRouter Privacy Policy
-                </a>
-                .
+                <strong>Eigener / lokaler Endpunkt:</strong> Ein lokaler Inferenz-Server (z. B. Ollama unter{' '}
+                <span className="font-mono">http://localhost:11434/v1</span> oder LM Studio), bei dem Texte deinen
+                Rechner überhaupt nicht verlassen.
+              </li>
+              <li>
+                <strong>Übertragene Inhalte &amp; Logs:</strong> Übertragen werden dein eingegebener Text,
+                Sprach-/Stil-/Ton-Anweisungen, aktive Wörterbuch-Begriffe, Schreibregeln sowie dein API-Schlüssel im
+                Auth-Header. Externe API-Anbieter protokollieren Abrechnungsmetadaten (Zeitpunkt, Tokens, Modell) gemäß
+                ihrer jeweiligen API-Bedingungen.
               </li>
             </ul>
           </div>
         )}
       </section>
 
-      {/* 5. Downstream AI Providers & :free models */}
+      {/* 5. Downstream AI Providers & Free Tiers */}
       <section className="rounded-lg border border-neutral-300/90 dark:border-neutral-800 bg-white dark:bg-[#0C1019] p-5 sm:p-6 space-y-3 shadow-2xs">
         <div className="flex items-center gap-2.5">
           <Database className="w-4 h-4 text-neutral-700 dark:text-neutral-300 shrink-0" />
           <h2 className="text-sm font-semibold text-neutral-950 dark:text-white">
             {isEn
-              ? '5. Downstream AI Model Providers & Free (:free) Models'
-              : '5. Nachgelagerte KI-Modellanbieter & Gratis-Modelle (:free)'}
+              ? '5. Downstream Model Hosters & Free Tiers (:free / Experiment)'
+              : '5. Nachgelagerte Modellanbieter & Gratis-Kontingente (:free / Free-Tier)'}
           </h2>
         </div>
         {isEn ? (
           <div className="text-sm leading-relaxed text-neutral-700 dark:text-neutral-300 space-y-2">
             <p>
-              OpenRouter forwards your prompt to the upstream provider hosting the selected model (e.g. Google,
-              Anthropic, OpenAI, Mistral, Meta/Llama hosters, Qwen, DeepSeek, or third-party inference clouds). Each
-              provider operates under its own retention and training policies.
+              When using a multi-model router (OpenRouter, Requesty, Hugging Face Router), the router forwards your prompt
+              to the upstream model provider hosting that checkpoint. When using a direct API (such as Mistral,
+              Anthropic, or OpenAI), there is no intermediary router.
             </p>
             <p className="text-xs text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/60 rounded-md p-3">
-              <strong>Important note on free models (<span className="font-mono">:free</span> / <span className="font-mono">openrouter/free</span>):</strong>{' '}
-              Many free inference endpoints reserve the right to log prompts or use inputs for model improvement and
-              evaluation. Do not send confidential, personal, or NDA-protected texts to unverified free endpoints.
+              <strong>Important note on free endpoints (<span className="font-mono">:free</span>, free tiers):</strong>{' '}
+              Many free inference endpoints reserve the right to log prompts or use inputs for quality assurance and
+              model improvement. Do not send confidential, personal, or NDA-protected texts to unverified free endpoints.
             </p>
           </div>
         ) : (
           <div className="text-sm leading-relaxed text-neutral-700 dark:text-neutral-300 space-y-2">
             <p>
-              OpenRouter leitet deine Anfrage an den jeweiligen Infrastruktur-Anbieter des gewählten Modells weiter
-              (z. B. Google, Anthropic, OpenAI, Mistral oder spezialisierte Hosting-Partner). Für die Verarbeitung durch
-              den Endanbieter gelten dessen eigene Datenschutz- und Aufbewahrungsrichtlinien.
+              Bei Nutzung eines Multi-Modell-Routers (OpenRouter, Requesty, Hugging Face Router) wird deine Anfrage an
+              den hinterlegten Inferenz-Partner des gewählten Modells weitergeleitet. Bei direkten APIs (z. B. Mistral,
+              Anthropic, OpenAI) entfällt ein zwischengeschalteter Router vollständig.
             </p>
             <p className="text-xs text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/60 rounded-md p-3">
-              <strong>Hinweis zu Gratis-Modellen (<span className="font-mono">:free</span> / <span className="font-mono">openrouter/free</span>):</strong>{' '}
+              <strong>Hinweis zu Gratis-Modellen (<span className="font-mono">:free</span> / Free-Tier):</strong>{' '}
               Viele kostenlose Endpunkte behalten sich in ihren Nutzungsbedingungen vor, übermittelte Prompts zur
               Qualitätssicherung oder für Modelltraining heranzuziehen. Vertrauliche, personenbezogene oder geschützte
               Texte solltest du daher nicht über unbeschränkte Gratis-Endpunkte verarbeiten.
@@ -434,11 +427,16 @@ export function PrivacyView({
           {isEn ? (
             <>
               <li>
-                Enable <strong>Zero Data Retention (ZDR)</strong> in the OpenRouter drawer so OpenRouter only routes
-                requests to endpoints that contractually do not retain prompts or completions.
+                Run models 100% locally via <strong>Ollama</strong> or <strong>LM Studio</strong> under the{' '}
+                <em>Local / Custom</em> provider so no text leaves your machine.
               </li>
               <li>
-                Verify your account-level privacy switches in your{' '}
+                For strict EU data residency, connect directly to <strong>Mistral AI (Paris)</strong> or switch{' '}
+                <strong>Requesty</strong> to its EU endpoint (<span className="font-mono">router.eu.requesty.ai</span>).
+              </li>
+              <li>
+                When using <strong>OpenRouter</strong>, enable <strong>Zero Data Retention (ZDR)</strong> in the API
+                drawer and verify account privacy switches under{' '}
                 <a
                   href="https://openrouter.ai/settings/privacy"
                   target="_blank"
@@ -450,17 +448,22 @@ export function PrivacyView({
                 .
               </li>
               <li>
-                On shared or public computers, clear your API key and local browser storage after finishing your work.
+                On shared or public computers, clear your API keys and local browser storage after finishing your work.
               </li>
             </>
           ) : (
             <>
               <li>
-                Aktiviere im OpenRouter-Menü <strong>Zero Data Retention (ZDR)</strong>, damit Anfragen nur an
-                Anbieter-Endpunkte geroutet werden, die Prompts und Antworten vertraglich nicht speichern.
+                Betreibe sensible Aufgaben vollständig lokal über <strong>Ollama</strong> oder <strong>LM Studio</strong>{' '}
+                (Anbieter <em>Lokal / Custom</em>), sodass kein Text deinen Rechner verlässt.
               </li>
               <li>
-                Prüfe die globalen Datenschutzeinstellungen direkt in deinem Konto unter{' '}
+                Für europäische Datenverarbeitung wähle direkt <strong>Mistral AI (Paris)</strong> oder stelle bei{' '}
+                <strong>Requesty</strong> den EU-Endpunkt (<span className="font-mono">router.eu.requesty.ai</span>) ein.
+              </li>
+              <li>
+                Aktiviere bei <strong>OpenRouter</strong> im API-Menü <strong>Zero Data Retention (ZDR)</strong> und
+                prüfe deine Kontoeinstellungen unter{' '}
                 <a
                   href="https://openrouter.ai/settings/privacy"
                   target="_blank"
@@ -472,7 +475,7 @@ export function PrivacyView({
                 .
               </li>
               <li>
-                Lösche auf gemeinsam genutzten Rechnern nach Abschluss deiner Arbeit deinen API-Key und den lokalen
+                Lösche auf gemeinsam genutzten Rechnern nach Abschluss deiner Arbeit deine API-Keys und den lokalen
                 Browser-Speicher.
               </li>
             </>
@@ -486,7 +489,7 @@ export function PrivacyView({
             className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-md bg-neutral-950 dark:bg-white text-white dark:text-neutral-950 hover:opacity-90 transition-opacity cursor-pointer"
           >
             <KeyRound className="w-3.5 h-3.5" />
-            {isEn ? 'Open OpenRouter & ZDR Settings' : 'OpenRouter & ZDR-Einstellungen öffnen'}
+            {isEn ? 'Open API & ZDR Settings' : 'API- & ZDR-Einstellungen öffnen'}
           </button>
 
           <a

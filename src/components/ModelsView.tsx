@@ -1,17 +1,22 @@
 import { useMemo, useState } from 'react';
 import { Check, Loader2, Lock, Search, Unlock } from 'lucide-react';
 import { useUiLang } from '../lib/i18n';
+import { API_PROVIDERS, getProviderDefinition } from '../lib/providers';
 import { isFreeOpenRouterModel } from '../types';
-import type { OpenRouterModel } from '../types';
+import type { ApiProviderId, OpenRouterModel } from '../types';
 
 type PriceFilter = 'all' | 'free' | 'paid';
 
 interface ModelsViewProps {
   models: OpenRouterModel[];
   loading: boolean;
+  activeProvider: ApiProviderId;
   activeModel: string;
+  browserProvider: ApiProviderId;
   paidModelsUnlocked: boolean;
-  onSelectModel: (modelId: string) => Promise<void>;
+  showPaidLockControls: boolean;
+  onChangeBrowserProvider: (provider: ApiProviderId) => Promise<void>;
+  onSelectModel: (modelId: string, providerId?: ApiProviderId) => Promise<void>;
   onRequestUnlock: (model?: OpenRouterModel) => void;
   onLockPaid: () => Promise<void>;
 }
@@ -19,8 +24,12 @@ interface ModelsViewProps {
 export function ModelsView({
   models,
   loading,
+  activeProvider,
   activeModel,
+  browserProvider,
   paidModelsUnlocked,
+  showPaidLockControls,
+  onChangeBrowserProvider,
   onSelectModel,
   onRequestUnlock,
   onLockPaid,
@@ -34,37 +43,45 @@ export function ModelsView({
   const [savingId, setSavingId] = useState<string | null>(null);
   const [locking, setLocking] = useState(false);
 
+  const browserDef = getProviderDefinition(browserProvider);
+  const activeDef = getProviderDefinition(activeProvider);
+  const routerProviders = useMemo(() => API_PROVIDERS.filter((p) => p.category === 'router'), []);
+  const directProviders = useMemo(() => API_PROVIDERS.filter((p) => p.category === 'direct'), []);
+  const customProviders = useMemo(() => API_PROVIDERS.filter((p) => p.category === 'custom'), []);
+
   const counts = useMemo(() => {
     let free = 0;
     let paid = 0;
     for (const m of models) {
-      if (isFreeOpenRouterModel(m)) free++;
+      if (isFreeOpenRouterModel(m, browserProvider)) free++;
       else paid++;
     }
     return { all: models.length, free, paid };
-  }, [models]);
+  }, [models, browserProvider]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return models.filter((m) => {
-      if (priceFilter === 'free' && !isFreeOpenRouterModel(m)) return false;
-      if (priceFilter === 'paid' && isFreeOpenRouterModel(m)) return false;
+      const isFree = isFreeOpenRouterModel(m, browserProvider);
+      if (priceFilter === 'free' && !isFree) return false;
+      if (priceFilter === 'paid' && isFree) return false;
       if (!q) return true;
       return m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q);
     });
-  }, [models, search, priceFilter]);
+  }, [models, search, priceFilter, browserProvider]);
 
   const visibleModels = showAll ? filtered : filtered.slice(0, 120);
 
   async function handleChoose(model: OpenRouterModel) {
-    if (!isFreeOpenRouterModel(model) && !paidModelsUnlocked) {
+    const isFree = isFreeOpenRouterModel(model, browserProvider);
+    if (showPaidLockControls && !isFree && !paidModelsUnlocked) {
       onRequestUnlock(model);
       return;
     }
 
     setSavingId(model.id);
     try {
-      await onSelectModel(model.id);
+      await onSelectModel(model.id, browserProvider);
     } finally {
       setSavingId(null);
     }
@@ -83,7 +100,40 @@ export function ModelsView({
     <div className="max-w-[1440px] mx-auto px-4 sm:px-6 py-6 space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex flex-wrap items-center gap-3 flex-1 min-w-[260px]">
-          <div className="relative flex-1 min-w-[220px] max-w-md">
+          <select
+            aria-label={isEn ? 'Select AI provider' : 'KI-Anbieter wählen'}
+            value={browserProvider}
+            onChange={(e) => {
+              setShowAll(false);
+              setPriceFilter('all');
+              void onChangeBrowserProvider(e.target.value as ApiProviderId);
+            }}
+            className="h-10 px-3 text-sm font-medium rounded-md border border-neutral-300 dark:border-neutral-800 bg-white dark:bg-[#0A0D14] text-neutral-950 dark:text-neutral-100 focus:outline-none focus:border-neutral-950 dark:focus:border-white cursor-pointer"
+          >
+            <optgroup label={isEn ? 'Multi-Model Routers' : 'Multi-Modell-Router'}>
+              {routerProviders.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </optgroup>
+            <optgroup label={isEn ? 'Direct AI APIs' : 'Direkte KI-APIs'}>
+              {directProviders.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </optgroup>
+            <optgroup label={isEn ? 'Local / Custom' : 'Lokal / Custom'}>
+              {customProviders.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </optgroup>
+          </select>
+
+          <div className="relative flex-1 min-w-[200px] max-w-md">
             <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"
@@ -92,7 +142,9 @@ export function ModelsView({
                 setSearch(e.target.value);
                 setShowAll(false);
               }}
-              placeholder={isEn ? 'Filter OpenRouter models…' : 'OpenRouter-Modelle filtern…'}
+              placeholder={
+                isEn ? `Filter ${browserDef.name} models…` : `${browserDef.name}-Modelle filtern…`
+              }
               className="w-full h-10 pl-9 pr-3 text-sm rounded-md border border-neutral-300 dark:border-neutral-800 bg-white dark:bg-[#0A0D14] text-neutral-950 dark:text-neutral-100 focus:outline-none focus:border-neutral-950 dark:focus:border-white"
             />
           </div>
@@ -135,29 +187,32 @@ export function ModelsView({
         <div className="flex flex-wrap items-center gap-3 shrink-0">
           <div className="text-xs text-neutral-500 dark:text-neutral-400 tabular-nums">
             {isEn ? 'Active:' : 'Aktiv:'}{' '}
-            <span className="font-mono text-neutral-900 dark:text-neutral-100">{activeModel}</span>
+            <span className="font-mono text-neutral-900 dark:text-neutral-100">
+              {activeDef.shortName} · {activeModel}
+            </span>
           </div>
 
-          {paidModelsUnlocked ? (
-            <button
-              type="button"
-              disabled={locking}
-              onClick={handleLockClick}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-emerald-300 dark:border-emerald-900/70 bg-emerald-50/70 dark:bg-emerald-950/30 text-emerald-800 dark:text-emerald-300 hover:bg-emerald-100/80 dark:hover:bg-emerald-950/60 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-            >
-              {locking ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Unlock className="w-3.5 h-3.5" />}
-              {isEn ? 'Paid unlocked · Lock' : 'Kostenpflichtige entsperrt · Sperren'}
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={() => onRequestUnlock()}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-[#0A0D14] text-neutral-800 dark:text-neutral-200 hover:border-neutral-950 dark:hover:border-white transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-            >
-              <Lock className="w-3.5 h-3.5 text-neutral-500 dark:text-neutral-400" />
-              {isEn ? 'Unlock paid models' : 'Kostenpflichtige entsperren'}
-            </button>
-          )}
+          {showPaidLockControls &&
+            (paidModelsUnlocked ? (
+              <button
+                type="button"
+                disabled={locking}
+                onClick={handleLockClick}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-emerald-300 dark:border-emerald-900/70 bg-emerald-50/70 dark:bg-emerald-950/30 text-emerald-800 dark:text-emerald-300 hover:bg-emerald-100/80 dark:hover:bg-emerald-950/60 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              >
+                {locking ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Unlock className="w-3.5 h-3.5" />}
+                {isEn ? 'Paid unlocked · Lock' : 'Kostenpflichtige entsperrt · Sperren'}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => onRequestUnlock()}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-[#0A0D14] text-neutral-800 dark:text-neutral-200 hover:border-neutral-950 dark:hover:border-white transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              >
+                <Lock className="w-3.5 h-3.5 text-neutral-500 dark:text-neutral-400" />
+                {isEn ? 'Unlock paid models' : 'Kostenpflichtige entsperren'}
+              </button>
+            ))}
         </div>
       </div>
 
@@ -191,10 +246,10 @@ export function ModelsView({
               </tr>
             ) : (
               visibleModels.map((m) => {
-                const isActive = m.id === activeModel;
+                const isActive = m.id === activeModel && browserProvider === activeProvider;
                 const isSaving = savingId === m.id;
-                const isFree = isFreeOpenRouterModel(m);
-                const needsPassword = !isFree && !paidModelsUnlocked;
+                const isFree = isFreeOpenRouterModel(m, browserProvider);
+                const needsPassword = showPaidLockControls && !isFree && !paidModelsUnlocked;
                 return (
                   <tr
                     key={m.id}
@@ -216,8 +271,8 @@ export function ModelsView({
                     <td className="py-2.5 px-4 text-right tabular-nums text-neutral-700 dark:text-neutral-300 whitespace-nowrap">
                       {m.promptPricePer1M < 0
                         ? isEn
-                          ? 'Variable'
-                          : 'Variabel'
+                          ? 'Per plan'
+                          : 'Nach Tarif'
                         : isFree
                           ? isEn
                             ? 'Free'
@@ -227,8 +282,8 @@ export function ModelsView({
                     <td className="py-2.5 px-4 text-right tabular-nums text-neutral-700 dark:text-neutral-300 whitespace-nowrap">
                       {m.completionPricePer1M < 0
                         ? isEn
-                          ? 'Variable'
-                          : 'Variabel'
+                          ? 'Per plan'
+                          : 'Nach Tarif'
                         : isFree
                           ? isEn
                             ? 'Free'

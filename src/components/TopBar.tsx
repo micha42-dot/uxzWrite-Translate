@@ -3,6 +3,7 @@ import { motion } from 'motion/react';
 import logoDark from '../assets/logo-dark.png';
 import logoLight from '../assets/logo-light.png';
 import { useUiLang } from '../lib/i18n';
+import { getProviderDefinition } from '../lib/providers';
 import type { OpenRouterStatus } from '../types';
 
 export type ActiveTab = 'editor' | 'translate' | 'rules' | 'history' | 'models' | 'privacy';
@@ -32,6 +33,15 @@ export function TopBar({
 }: TopBarProps) {
   const { uiLang } = useUiLang();
   const isEn = uiLang === 'en';
+  const providerDef = getProviderDefinition(status.provider);
+  const shortModel = (status.model.split('/').pop() || status.model).toUpperCase();
+  const apiButtonLabel = status.configured
+    ? status.provider === 'openrouter'
+      ? status.model === 'openrouter/free'
+        ? 'FREE ROUTER'
+        : shortModel || 'OPENROUTER'
+      : `${providerDef.shortName} · ${shortModel}`
+    : 'BYOK API';
 
   const navItems: Array<{ id: ActiveTab; label: string; count?: number }> = [
     { id: 'editor', label: 'Editor' },
@@ -136,12 +146,8 @@ export function TopBar({
             }`}
           >
             <KeyRound className="w-3.5 h-3.5 shrink-0 opacity-85" />
-            <span className="max-w-[96px] sm:max-w-[140px] truncate tracking-tight">
-              {status.configured
-                ? status.model === 'openrouter/free'
-                  ? 'FREE ROUTER'
-                  : status.model.split('/').pop()?.toUpperCase() || 'OPENROUTER'
-                : 'BYOK API'}
+            <span className="max-w-[110px] sm:max-w-[175px] truncate tracking-tight">
+              {apiButtonLabel}
             </span>
           </button>
         </div>

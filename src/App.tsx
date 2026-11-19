@@ -27,6 +27,7 @@ import {
 import { UiLanguageContext } from './lib/i18n';
 import { DEFAULT_STARTER_RULES } from './types';
 import type {
+  ApiProviderId,
   ChangeItem,
   HistoryEntry,
   OpenRouterModel,
@@ -78,6 +79,9 @@ export default function App() {
 
   const [status, setStatus] = useState<OpenRouterStatus>({
     configured: false,
+    provider: 'openrouter',
+    customBaseUrl: 'https://openrouter.ai/api/v1',
+    configuredProviders: [],
     source: 'none',
     keyPreview: null,
     model: 'openrouter/free',
@@ -90,6 +94,7 @@ export default function App() {
   });
 
   const [models, setModels] = useState<OpenRouterModel[]>([]);
+  const [modelsProvider, setModelsProvider] = useState<ApiProviderId>('openrouter');
   const [modelsLoading, setModelsLoading] = useState(false);
 
   const [history, setHistory] = useState<HistoryEntry[]>([]);
@@ -186,26 +191,36 @@ export default function App() {
     }
   }, []);
 
-  const fetchModels = useCallback(async () => {
-    if (models.length > 0) return;
-    setModelsLoading(true);
-    try {
-      const loaded = await fetchOpenRouterModels();
-      setModels(loaded);
-    } finally {
-      setModelsLoading(false);
-    }
-  }, [models.length]);
+  const refreshModels = useCallback(
+    async (providerOverride?: ApiProviderId, customBaseUrlOverride?: string) => {
+      const targetProvider = providerOverride || status.provider || 'openrouter';
+      setModelsProvider(targetProvider);
+      setModelsLoading(true);
+      try {
+        const loaded = await fetchOpenRouterModels(targetProvider, customBaseUrlOverride);
+        setModels(loaded);
+      } finally {
+        setModelsLoading(false);
+      }
+    },
+    [status.provider]
+  );
 
   useEffect(() => {
     fetchStatusAndHistory();
   }, [fetchStatusAndHistory]);
 
   useEffect(() => {
-    if (settingsOpen || activeTab === 'models') {
-      fetchModels();
+    if (settingsOpen) {
+      if (models.length === 0 || modelsProvider !== status.provider) {
+        void refreshModels(status.provider, status.customBaseUrl);
+      }
+    } else if (activeTab === 'models') {
+      if (models.length === 0) {
+        void refreshModels(status.provider, status.customBaseUrl);
+      }
     }
-  }, [settingsOpen, activeTab, fetchModels]);
+  }, [settingsOpen, activeTab, models.length, modelsProvider, status.provider, status.customBaseUrl, refreshModels]);
 
   async function handleSaveHistory(payload: {
     sourceText: string;
@@ -270,8 +285,8 @@ export default function App() {
     if (pendingUnlockModel) {
       const saveRes = await saveOpenRouterConfig(
         pendingUnlockSlot === 'secondary'
-          ? { secondaryModel: pendingUnlockModel.id }
-          : { model: pendingUnlockModel.id }
+          ? { provider: status.provider, secondaryModel: pendingUnlockModel.id }
+          : { provider: modelsProvider || status.provider, model: pendingUnlockModel.id }
       );
       if (saveRes.ok) {
         nextStatus = saveRes.status;
@@ -290,15 +305,26 @@ export default function App() {
     }
   }
 
-  async function handleSelectModel(modelId: string) {
-    const result = await saveOpenRouterConfig({ model: modelId });
+  async function handleSelectModel(modelId: string, providerOverride?: ApiProviderId) {
+    const targetProvider = providerOverride || status.provider || 'openrouter';
+    const result = await saveOpenRouterConfig({ provider: targetProvider, model: modelId });
     if (result.ok) {
       setStatus(result.status);
+      if (!result.status.configured) {
+        setSettingsOpen(true);
+      }
       return;
     }
     if (result.code === 'PAID_MODEL_LOCKED') {
       const target = models.find((m) => m.id === modelId) ?? null;
       handleRequestUnlock(target ?? undefined);
+    }
+  }
+
+  function handleStatusUpdated(next: OpenRouterStatus) {
+    setStatus(next);
+    if (next.provider !== modelsProvider) {
+      void refreshModels(next.provider, next.customBaseUrl);
     }
   }
 
@@ -412,8 +438,18 @@ export default function App() {
           <ModelsView
             models={models}
             loading={modelsLoading}
+            activeProvider={status.provider}
             activeModel={status.model}
+            browserProvider={modelsProvider}
             paidModelsUnlocked={status.paidModelsUnlocked}
+            showPaidLockControls={
+              status.provider === 'openrouter' ||
+              status.source === 'env' ||
+              status.paidModelsPasswordConfigured
+            }
+            onChangeBrowserProvider={async (p) => {
+              await refreshModels(p);
+            }}
             onSelectModel={handleSelectModel}
             onRequestUnlock={handleRequestUnlock}
             onLockPaid={handleLockPaid}
@@ -466,7 +502,8 @@ export default function App() {
         status={status}
         models={models}
         modelsLoading={modelsLoading}
-        onStatusUpdated={setStatus}
+        onStatusUpdated={handleStatusUpdated}
+        onRefreshModels={refreshModels}
         onRequestUnlock={handleRequestUnlock}
         onLockPaid={handleLockPaid}
         onClearAllData={handleClearAllLocalData}

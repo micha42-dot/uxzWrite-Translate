@@ -18,6 +18,7 @@ import { fetchSentenceAlternatives, streamRewriteRequest } from '../lib/apiClien
 import { computeWordDiff, countTextStats, splitIntoParagraphChunks, splitIntoSentenceSpans } from '../lib/diff';
 import type { SentenceSpan } from '../lib/diff';
 import { getLanguageLabel, getToneLabel, useUiLang } from '../lib/i18n';
+import { getProviderDefinition } from '../lib/providers';
 import { DEFAULT_WORKSPACE_SETTINGS, SOURCE_LANGUAGES, TRANSLATABLE_LANGUAGES } from '../types';
 import type {
   ChangeItem,
@@ -232,7 +233,12 @@ export function TranslateWorkspace({
           let nextIdx = 0;
           let chunkErr: string | null = null;
           let chunkIsRateLimit = false;
-          const isFreeModel = status.model === 'openrouter/free' || status.model.endsWith(':free');
+          const activeProviderDef = getProviderDefinition(status.provider);
+          const isFreeModel =
+            status.provider === 'custom' ||
+            (status.provider === 'openrouter'
+              ? status.model === 'openrouter/free' || status.model.endsWith(':free')
+              : activeProviderDef.hasFreeTier);
           const desiredWorkers = isFreeModel
             ? wsSettings.freeModelConcurrency
             : wsSettings.paidModelConcurrency;
@@ -878,14 +884,16 @@ export function TranslateWorkspace({
               <div className="h-full flex flex-col items-center justify-center text-center gap-4 py-8">
                 <Languages className="w-6 h-6 text-neutral-400" />
                 <p className="text-sm font-medium text-neutral-950 dark:text-white">
-                  {isEn ? 'OpenRouter API key required' : 'OpenRouter API-Schlüssel erforderlich'}
+                  {isEn
+                    ? `${getProviderDefinition(status.provider).name} API key required`
+                    : `${getProviderDefinition(status.provider).name} API-Schlüssel erforderlich`}
                 </p>
                 <button
                   type="button"
                   onClick={onOpenSettings}
                   className="px-4 py-2 text-xs font-semibold rounded-md bg-neutral-950 dark:bg-white text-white dark:text-neutral-950 hover:bg-neutral-800 dark:hover:bg-neutral-100 transition-colors cursor-pointer"
                 >
-                  {isEn ? 'Configure OpenRouter API' : 'OpenRouter API hinterlegen'}
+                  {isEn ? 'Configure API' : 'API hinterlegen'}
                 </button>
               </div>
             ) : error ? (
@@ -899,19 +907,22 @@ export function TranslateWorkspace({
                   >
                     {isEn ? 'Retry' : 'Erneut versuchen'}
                   </button>
-                  {isRateLimitError && status.model !== 'openrouter/free' && onSelectModel && (
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        setError(null);
-                        setIsRateLimitError(false);
-                        await onSelectModel('openrouter/free');
-                      }}
-                      className="px-3 py-1.5 text-xs font-medium rounded-md border border-rose-300 dark:border-rose-800 text-rose-800 dark:text-rose-200 hover:bg-rose-100 dark:hover:bg-rose-950/60 cursor-pointer"
-                    >
-                      {isEn ? 'Use Free Models Router' : 'Free Models Router nutzen'}
-                    </button>
-                  )}
+                  {isRateLimitError &&
+                    status.provider === 'openrouter' &&
+                    status.model !== 'openrouter/free' &&
+                    onSelectModel && (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          setError(null);
+                          setIsRateLimitError(false);
+                          await onSelectModel('openrouter/free');
+                        }}
+                        className="px-3 py-1.5 text-xs font-medium rounded-md border border-rose-300 dark:border-rose-800 text-rose-800 dark:text-rose-200 hover:bg-rose-100 dark:hover:bg-rose-950/60 cursor-pointer"
+                      >
+                        {isEn ? 'Use Free Models Router' : 'Free Models Router nutzen'}
+                      </button>
+                    )}
                   {isRateLimitError && instantMode && (
                     <button
                       type="button"
@@ -926,7 +937,7 @@ export function TranslateWorkspace({
                     onClick={onOpenSettings}
                     className="text-xs font-medium text-rose-800 dark:text-rose-300 hover:underline cursor-pointer"
                   >
-                    {isEn ? 'Check OpenRouter' : 'OpenRouter prüfen'}
+                    {isEn ? 'Check API' : 'API prüfen'}
                   </button>
                 </div>
               </div>

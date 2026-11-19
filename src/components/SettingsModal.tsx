@@ -546,8 +546,8 @@ export function SettingsModal({
                       {isEn ? 'Default 450 ms:' : 'Standard 450 ms:'}
                     </span>{' '}
                     {isEn
-                      ? 'Enforces a short pause between consecutive OpenRouter calls so burst limits are not triggered immediately.'
-                      : 'Erzwingt eine kurze Taktung zwischen aufeinanderfolgenden OpenRouter-Calls, damit Burst-Limits nicht sofort anschlagen.'}
+                      ? 'Enforces a short pause between consecutive API calls so burst limits are not triggered immediately.'
+                      : 'Erzwingt eine kurze Taktung zwischen aufeinanderfolgenden API-Calls, damit Burst-Limits nicht sofort anschlagen.'}
                   </p>
                 </div>
 
