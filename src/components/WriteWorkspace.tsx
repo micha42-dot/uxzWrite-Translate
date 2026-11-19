@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   AlertCircle,
@@ -89,10 +89,10 @@ interface WriteWorkspaceProps {
 }
 
 const SAMPLE_TEXT_DE =
-  'Sehr geehrte Damen und Herren, ich schreibe Ihnen wegen dem neuen Projekt das wir letzte Woche besprochen hatten. Leider gab es ein paar missverständnisse bei der Zeitplanung und wir müssen das dringend klären damit alles reibungslos läuft. Es wäre super wenn wir uns morgen kurz telefonieren könnten.';
+  'Sam Altman, Dario Amodei und Elon Musk gehen zusammen in eine Bar. Sam bestellt sofort eine runde Getränke auf Kredit, und verspricht dem Barkeeper das nächste Bier wird alles verändern. Dario liest erst mal drei Stunden das Kleingedruckte auf der Karte, weil er Angst hat ein falscher Schluck könnte das ende der Menschheit bedeuten. Und Elon kauft kurzerhand den ganzen Laden, nennt ihn „X-Bar“ und schmeißt erstmal alle Stühle raus weil früher ging es doch auch im stehen!';
 
 const SAMPLE_TEXT_EN =
-  'Dear ladies and gentlemen, I am writing to you because the new project which we had discussed last week. Unfortunately there was a few misunderstandings with the time planning and we have to clarify this urgent so that everything runs smoothly. It would be great if we could phone each other short tomorrow.';
+  'Sam Altman, Dario Amodei, and Elon Musk walk into a bar. Sam immediately orders a round for everyone on credit and promise the bartender the next drink will change the entire world. Dario spends three hours reading the fine print on the coaster, worried that one wrong sip might wipe out humanity. Meanwhile, Elon buys the whole bar, renames it "X-Bar", and fire half the bartenders because apparently nobody really needed stools anyway.';
 
 export function WriteWorkspace({
   status,
@@ -255,20 +255,23 @@ export function WriteWorkspace({
     };
   }, [exportMenuOpen]);
 
-  const sourceStats = useMemo(() => countTextStats(sourceText), [sourceText]);
-  const refinedStats = useMemo(() => countTextStats(refinedText), [refinedText]);
+  const deferredSourceText = useDeferredValue(sourceText);
+  const deferredRefinedText = useDeferredValue(refinedText);
+
+  const sourceStats = useMemo(() => countTextStats(deferredSourceText), [deferredSourceText]);
+  const refinedStats = useMemo(() => countTextStats(deferredRefinedText), [deferredRefinedText]);
 
   const diffResult = useMemo(() => {
-    if (!refinedText || isStreaming) {
+    if (outputView !== 'diff' || !deferredRefinedText || isStreaming) {
       return { tokens: [], addedCount: 0, removedCount: 0, changeCount: 0 };
     }
-    return computeWordDiff(sourceText, refinedText);
-  }, [sourceText, refinedText, isStreaming]);
+    return computeWordDiff(deferredSourceText, deferredRefinedText);
+  }, [outputView, deferredSourceText, deferredRefinedText, isStreaming]);
 
   const sentenceSpans = useMemo(() => {
-    if (!refinedText || isStreaming) return [];
-    return splitIntoSentenceSpans(refinedText);
-  }, [refinedText, isStreaming]);
+    if (outputView !== 'clean' || !deferredRefinedText || isStreaming) return [];
+    return splitIntoSentenceSpans(deferredRefinedText);
+  }, [outputView, deferredRefinedText, isStreaming]);
 
   const classifyHunks = useCallback(
     async (orig: string, refined: string) => {
@@ -675,6 +678,20 @@ export function WriteWorkspace({
   useEffect(() => {
     if (!instantMode || !status.configured) return;
     if (!sourceText.trim()) {
+      if (abortRef.current) {
+        abortRef.current.abort();
+        abortRef.current = null;
+        setIsStreaming(false);
+        setActiveRunPhase(null);
+        setActiveRunModel(null);
+        setChunkProgress(null);
+        setRateLimitNotice(null);
+      }
+      if (analyzeAbortRef.current) {
+        analyzeAbortRef.current.abort();
+        analyzeAbortRef.current = null;
+        setAnalyzingChanges(false);
+      }
       lastTriggeredSignatureRef.current = '';
       onChangeRefinedText('');
       onChangeChanges([]);
@@ -683,6 +700,23 @@ export function WriteWorkspace({
 
     const signature = `${sourceLang}|${mode}|${style}|${status.model}|${preferencesSignature}|${sourceText}`;
     if (signature === lastTriggeredSignatureRef.current) return;
+
+    // Immediately stop any stale in-flight stream or change analysis so typing stays responsive
+    if (abortRef.current) {
+      abortRef.current.abort();
+      abortRef.current = null;
+      lastTriggeredSignatureRef.current = '';
+      setIsStreaming(false);
+      setActiveRunPhase(null);
+      setActiveRunModel(null);
+      setChunkProgress(null);
+      setRateLimitNotice(null);
+    }
+    if (analyzeAbortRef.current) {
+      analyzeAbortRef.current.abort();
+      analyzeAbortRef.current = null;
+      setAnalyzingChanges(false);
+    }
 
     const wsSettings = preferences.settings ?? DEFAULT_WORKSPACE_SETTINGS;
     const delay = pasteTriggeredRef.current ? wsSettings.pasteDebounceMs : wsSettings.typingDebounceMs;
@@ -712,6 +746,12 @@ export function WriteWorkspace({
     if (abortRef.current) {
       abortRef.current.abort();
       abortRef.current = null;
+      lastTriggeredSignatureRef.current = '';
+    }
+    if (analyzeAbortRef.current) {
+      analyzeAbortRef.current.abort();
+      analyzeAbortRef.current = null;
+      setAnalyzingChanges(false);
     }
     setRateLimitNotice(null);
     setIsStreaming(false);

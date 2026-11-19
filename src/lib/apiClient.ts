@@ -979,6 +979,50 @@ function extractTextFromStaticJson(protocol: 'openai' | 'anthropic', json: unkno
   return choices?.[0]?.message?.content?.trim() || '';
 }
 
+function createDeltaBatcher(onDelta: (acc: string) => void, signal: AbortSignal) {
+  let pending: string | null = null;
+  let rafId: number | null = null;
+
+  const flush = () => {
+    rafId = null;
+    if (signal.aborted || pending === null) return;
+    const value = pending;
+    pending = null;
+    onDelta(value);
+  };
+
+  return {
+    push(accumulated: string) {
+      if (signal.aborted) return;
+      pending = accumulated;
+      if (rafId === null) {
+        if (typeof requestAnimationFrame === 'function') {
+          rafId = requestAnimationFrame(flush);
+        } else {
+          flush();
+        }
+      }
+    },
+    finish(finalAccumulated: string) {
+      if (rafId !== null && typeof cancelAnimationFrame === 'function') {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
+      pending = null;
+      if (!signal.aborted && finalAccumulated) {
+        onDelta(finalAccumulated);
+      }
+    },
+    cancel() {
+      if (rafId !== null && typeof cancelAnimationFrame === 'function') {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
+      pending = null;
+    },
+  };
+}
+
 export async function streamRewriteRequest(params: {
   text: string;
   task?: RewriteTask;
@@ -1052,49 +1096,61 @@ export async function streamRewriteRequest(params: {
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder('utf-8');
+      const deltaBatcher = createDeltaBatcher(params.onDelta, params.signal);
       let buffer = '';
       let accumulated = '';
       let streamRateLimitError: string | null = null;
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const frames = buffer.split('\n\n');
-        buffer = frames.pop() ?? '';
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const frames = buffer.split('\n\n');
+          buffer = frames.pop() ?? '';
 
-        for (const frame of frames) {
-          const line = frame.trim();
-          if (!line.startsWith('data:')) continue;
-          const raw = line.slice(5).trim();
-          if (!raw) continue;
-          try {
-            const parsed = JSON.parse(raw) as { delta?: string; error?: string };
-            if (parsed.error) {
-              if (!accumulated && isRateLimitErrorPayload(0, parsed.error)) {
-                streamRateLimitError = parsed.error;
-                break;
+          let chunkUpdated = false;
+          for (const frame of frames) {
+            const line = frame.trim();
+            if (!line.startsWith('data:')) continue;
+            const raw = line.slice(5).trim();
+            if (!raw) continue;
+            try {
+              const parsed = JSON.parse(raw) as { delta?: string; error?: string };
+              if (parsed.error) {
+                deltaBatcher.cancel();
+                if (!accumulated && isRateLimitErrorPayload(0, parsed.error)) {
+                  streamRateLimitError = parsed.error;
+                  break;
+                }
+                return {
+                  ok: false,
+                  error: isRateLimitErrorPayload(0, parsed.error)
+                    ? formatFriendlyRateLimitMessage(parsed.error, activeProvider)
+                    : parsed.error,
+                  isRateLimit: isRateLimitErrorPayload(0, parsed.error),
+                };
               }
-              return {
-                ok: false,
-                error: isRateLimitErrorPayload(0, parsed.error)
-                  ? formatFriendlyRateLimitMessage(parsed.error, activeProvider)
-                  : parsed.error,
-                isRateLimit: isRateLimitErrorPayload(0, parsed.error),
-              };
+              if (typeof parsed.delta === 'string') {
+                accumulated += parsed.delta;
+                chunkUpdated = true;
+              }
+            } catch {
+              // Ignore malformed SSE frames
             }
-            if (typeof parsed.delta === 'string') {
-              accumulated += parsed.delta;
-              params.onDelta(accumulated);
-            }
-          } catch {
-            // Ignore malformed SSE frames
           }
+          if (chunkUpdated) {
+            deltaBatcher.push(accumulated);
+          }
+          if (streamRateLimitError) break;
         }
-        if (streamRateLimitError) break;
+      } catch (err) {
+        deltaBatcher.cancel();
+        throw err;
       }
 
       if (streamRateLimitError) {
+        deltaBatcher.cancel();
         rateLimitCooldownUntilMs = Date.now() + 25000;
         if (attempt < MAX_RETRIES) {
           const waitMs = parseRetryAfterMs(res.headers, streamRateLimitError, attempt);
@@ -1110,6 +1166,7 @@ export async function streamRewriteRequest(params: {
         };
       }
 
+      deltaBatcher.finish(accumulated);
       return { ok: true, text: accumulated };
     }
   }
@@ -1315,82 +1372,95 @@ export async function streamRewriteRequest(params: {
 
     const reader = upstream.body.getReader();
     const decoder = new TextDecoder('utf-8');
+    const deltaBatcher = createDeltaBatcher(params.onDelta, params.signal);
     let buffer = '';
     let accumulated = '';
     let streamRateLimitError: string | null = null;
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() ?? '';
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
 
-      for (const rawLine of lines) {
-        const line = rawLine.trim();
-        if (!line || !line.startsWith('data:')) continue;
-        const payload = line.slice(5).trim();
-        if (payload === '[DONE]') continue;
-        try {
-          if (def.protocol === 'anthropic') {
-            const parsed = JSON.parse(payload) as {
-              type?: string;
-              delta?: { type?: string; text?: string };
-              error?: { message?: string };
-            };
-            if (parsed.type === 'error' || parsed.error?.message) {
-              const msg = parsed.error?.message || 'Anthropic Stream Error';
-              const isRl = isRateLimitErrorPayload(0, msg);
-              if (!accumulated && isRl) {
-                streamRateLimitError = msg;
-                break;
-              }
-              return {
-                ok: false,
-                error: isRl ? formatFriendlyRateLimitMessage(msg, activeProvider) : msg,
-                isRateLimit: isRl,
+        let chunkUpdated = false;
+        for (const rawLine of lines) {
+          const line = rawLine.trim();
+          if (!line || !line.startsWith('data:')) continue;
+          const payload = line.slice(5).trim();
+          if (payload === '[DONE]') continue;
+          try {
+            if (def.protocol === 'anthropic') {
+              const parsed = JSON.parse(payload) as {
+                type?: string;
+                delta?: { type?: string; text?: string };
+                error?: { message?: string };
               };
-            }
-            if (
-              parsed.type === 'content_block_delta' &&
-              parsed.delta?.type === 'text_delta' &&
-              typeof parsed.delta.text === 'string' &&
-              parsed.delta.text.length > 0
-            ) {
-              accumulated += parsed.delta.text;
-              params.onDelta(accumulated);
-            }
-          } else {
-            const parsed = JSON.parse(payload) as {
-              choices?: Array<{ delta?: { content?: string } }>;
-              error?: { message?: string };
-            };
-            if (parsed.error?.message) {
-              const isRl = isRateLimitErrorPayload(0, parsed.error.message);
-              if (!accumulated && isRl) {
-                streamRateLimitError = parsed.error.message;
-                break;
+              if (parsed.type === 'error' || parsed.error?.message) {
+                deltaBatcher.cancel();
+                const msg = parsed.error?.message || 'Anthropic Stream Error';
+                const isRl = isRateLimitErrorPayload(0, msg);
+                if (!accumulated && isRl) {
+                  streamRateLimitError = msg;
+                  break;
+                }
+                return {
+                  ok: false,
+                  error: isRl ? formatFriendlyRateLimitMessage(msg, activeProvider) : msg,
+                  isRateLimit: isRl,
+                };
               }
-              return {
-                ok: false,
-                error: isRl ? formatFriendlyRateLimitMessage(parsed.error.message, activeProvider) : parsed.error.message,
-                isRateLimit: isRl,
+              if (
+                parsed.type === 'content_block_delta' &&
+                parsed.delta?.type === 'text_delta' &&
+                typeof parsed.delta.text === 'string' &&
+                parsed.delta.text.length > 0
+              ) {
+                accumulated += parsed.delta.text;
+                chunkUpdated = true;
+              }
+            } else {
+              const parsed = JSON.parse(payload) as {
+                choices?: Array<{ delta?: { content?: string } }>;
+                error?: { message?: string };
               };
+              if (parsed.error?.message) {
+                deltaBatcher.cancel();
+                const isRl = isRateLimitErrorPayload(0, parsed.error.message);
+                if (!accumulated && isRl) {
+                  streamRateLimitError = parsed.error.message;
+                  break;
+                }
+                return {
+                  ok: false,
+                  error: isRl ? formatFriendlyRateLimitMessage(parsed.error.message, activeProvider) : parsed.error.message,
+                  isRateLimit: isRl,
+                };
+              }
+              const delta = parsed.choices?.[0]?.delta?.content;
+              if (typeof delta === 'string' && delta.length > 0) {
+                accumulated += delta;
+                chunkUpdated = true;
+              }
             }
-            const delta = parsed.choices?.[0]?.delta?.content;
-            if (typeof delta === 'string' && delta.length > 0) {
-              accumulated += delta;
-              params.onDelta(accumulated);
-            }
+          } catch {
+            // Ignore partial keepalive frames
           }
-        } catch {
-          // Ignore partial keepalive frames
         }
+        if (chunkUpdated) {
+          deltaBatcher.push(accumulated);
+        }
+        if (streamRateLimitError) break;
       }
-      if (streamRateLimitError) break;
+    } catch (err) {
+      deltaBatcher.cancel();
+      throw err;
     }
 
     if (streamRateLimitError) {
+      deltaBatcher.cancel();
       rateLimitCooldownUntilMs = Date.now() + 25000;
       if (attempt < MAX_RETRIES) {
         const waitMs = parseRetryAfterMs(upstream.headers, streamRateLimitError, attempt);
@@ -1406,6 +1476,7 @@ export async function streamRewriteRequest(params: {
       };
     }
 
+    deltaBatcher.finish(accumulated);
     return { ok: true, text: accumulated };
   }
 

@@ -10,9 +10,151 @@ function tokenize(text: string): string[] {
   return matches ?? [];
 }
 
+const MAX_DP_CELLS = 400_000;
+
+function runWordLcsDp(midA: string[], midB: string[], tokens: DiffToken[]): void {
+  const m = midA.length;
+  const n = midB.length;
+  if (m === 0 && n > 0) {
+    tokens.push({ type: 'add', value: midB.join('') });
+    return;
+  }
+  if (n === 0 && m > 0) {
+    tokens.push({ type: 'remove', value: midA.join('') });
+    return;
+  }
+  if (m === 0 || n === 0) return;
+
+  if (m * n > MAX_DP_CELLS) {
+    tokens.push({ type: 'remove', value: midA.join('') });
+    tokens.push({ type: 'add', value: midB.join('') });
+    return;
+  }
+
+  const cols = n + 1;
+  const dp = new Int32Array((m + 1) * cols);
+
+  for (let i = m - 1; i >= 0; i--) {
+    const rowOffset = i * cols;
+    const nextRowOffset = (i + 1) * cols;
+    for (let j = n - 1; j >= 0; j--) {
+      if (midA[i] === midB[j]) {
+        dp[rowOffset + j] = dp[nextRowOffset + (j + 1)] + 1;
+      } else {
+        const down = dp[nextRowOffset + j];
+        const right = dp[rowOffset + (j + 1)];
+        dp[rowOffset + j] = down >= right ? down : right;
+      }
+    }
+  }
+
+  let i = 0;
+  let j = 0;
+  while (i < m && j < n) {
+    if (midA[i] === midB[j]) {
+      tokens.push({ type: 'equal', value: midA[i] });
+      i++;
+      j++;
+    } else if (dp[(i + 1) * cols + j] >= dp[i * cols + (j + 1)]) {
+      tokens.push({ type: 'remove', value: midA[i] });
+      i++;
+    } else {
+      tokens.push({ type: 'add', value: midB[j] });
+      j++;
+    }
+  }
+  while (i < m) {
+    tokens.push({ type: 'remove', value: midA[i] });
+    i++;
+  }
+  while (j < n) {
+    tokens.push({ type: 'add', value: midB[j] });
+    j++;
+  }
+}
+
+function diffByParagraphs(origMid: string, refMid: string, tokens: DiffToken[]): boolean {
+  const pA = origMid.split(/(?<=\n)/);
+  const pB = refMid.split(/(?<=\n)/);
+  const pm = pA.length;
+  const pn = pB.length;
+  if (pm <= 1 && pn <= 1) return false;
+  if (pm * pn > 100_000) return false;
+
+  const cols = pn + 1;
+  const dp = new Int32Array((pm + 1) * cols);
+  for (let i = pm - 1; i >= 0; i--) {
+    const rowOffset = i * cols;
+    const nextRowOffset = (i + 1) * cols;
+    for (let j = pn - 1; j >= 0; j--) {
+      if (pA[i] === pB[j]) {
+        dp[rowOffset + j] = dp[nextRowOffset + (j + 1)] + 1;
+      } else {
+        const down = dp[nextRowOffset + j];
+        const right = dp[rowOffset + (j + 1)];
+        dp[rowOffset + j] = down >= right ? down : right;
+      }
+    }
+  }
+
+  const flushPendingPair = (remLines: string[], addLines: string[]) => {
+    if (remLines.length === 0 && addLines.length === 0) return;
+    if (remLines.length === 0) {
+      tokens.push({ type: 'add', value: addLines.join('') });
+    } else if (addLines.length === 0) {
+      tokens.push({ type: 'remove', value: remLines.join('') });
+    } else {
+      const tA = tokenize(remLines.join(''));
+      const tB = tokenize(addLines.join(''));
+      let ps = 0;
+      while (ps < tA.length && ps < tB.length && tA[ps] === tB[ps]) ps++;
+      let peA = tA.length - 1;
+      let peB = tB.length - 1;
+      while (peA >= ps && peB >= ps && tA[peA] === tB[peB]) {
+        peA--;
+        peB--;
+      }
+      if (ps > 0) tokens.push({ type: 'equal', value: tA.slice(0, ps).join('') });
+      runWordLcsDp(tA.slice(ps, peA + 1), tB.slice(ps, peB + 1), tokens);
+      if (peA + 1 < tA.length) tokens.push({ type: 'equal', value: tA.slice(peA + 1).join('') });
+    }
+    remLines.length = 0;
+    addLines.length = 0;
+  };
+
+  let i = 0;
+  let j = 0;
+  const remLines: string[] = [];
+  const addLines: string[] = [];
+  while (i < pm && j < pn) {
+    if (pA[i] === pB[j]) {
+      flushPendingPair(remLines, addLines);
+      tokens.push({ type: 'equal', value: pA[i] });
+      i++;
+      j++;
+    } else if (dp[(i + 1) * cols + j] >= dp[i * cols + (j + 1)]) {
+      remLines.push(pA[i]);
+      i++;
+    } else {
+      addLines.push(pB[j]);
+      j++;
+    }
+  }
+  while (i < pm) {
+    remLines.push(pA[i]);
+    i++;
+  }
+  while (j < pn) {
+    addLines.push(pB[j]);
+    j++;
+  }
+  flushPendingPair(remLines, addLines);
+  return true;
+}
+
 /**
  * Computes a word-level Longest Common Subsequence (LCS) diff between original and refined text.
- * Uses prefix/suffix trimming and a flat typed DP table for predictable performance.
+ * Uses prefix/suffix trimming, paragraph-level fallback, and a capped typed DP table for predictable UI speed.
  */
 export function computeWordDiff(original: string, refined: string): {
   tokens: DiffToken[];
@@ -52,58 +194,16 @@ export function computeWordDiff(original: string, refined: string): {
 
   const midA = a.slice(start, endA + 1);
   const midB = b.slice(start, endB + 1);
-  const m = midA.length;
-  const n = midB.length;
 
-  // Guard against extreme quadratic blowup on massive documents (> 2500 changed tokens)
-  if (m * n > 4_000_000) {
-    if (m > 0) tokens.push({ type: 'remove', value: midA.join('') });
-    if (n > 0) tokens.push({ type: 'add', value: midB.join('') });
-  } else if (m === 0 && n > 0) {
-    tokens.push({ type: 'add', value: midB.join('') });
-  } else if (n === 0 && m > 0) {
-    tokens.push({ type: 'remove', value: midA.join('') });
-  } else if (m > 0 && n > 0) {
-    const cols = n + 1;
-    const dp = new Int32Array((m + 1) * cols);
-
-    for (let i = m - 1; i >= 0; i--) {
-      const rowOffset = i * cols;
-      const nextRowOffset = (i + 1) * cols;
-      for (let j = n - 1; j >= 0; j--) {
-        if (midA[i] === midB[j]) {
-          dp[rowOffset + j] = dp[nextRowOffset + (j + 1)] + 1;
-        } else {
-          const down = dp[nextRowOffset + j];
-          const right = dp[rowOffset + (j + 1)];
-          dp[rowOffset + j] = down >= right ? down : right;
-        }
-      }
+  if (midA.length * midB.length > MAX_DP_CELLS) {
+    const midOrig = midA.join('');
+    const midRef = midB.join('');
+    if (!diffByParagraphs(midOrig, midRef, tokens)) {
+      if (midOrig) tokens.push({ type: 'remove', value: midOrig });
+      if (midRef) tokens.push({ type: 'add', value: midRef });
     }
-
-    let i = 0;
-    let j = 0;
-    while (i < m && j < n) {
-      if (midA[i] === midB[j]) {
-        tokens.push({ type: 'equal', value: midA[i] });
-        i++;
-        j++;
-      } else if (dp[(i + 1) * cols + j] >= dp[i * cols + (j + 1)]) {
-        tokens.push({ type: 'remove', value: midA[i] });
-        i++;
-      } else {
-        tokens.push({ type: 'add', value: midB[j] });
-        j++;
-      }
-    }
-    while (i < m) {
-      tokens.push({ type: 'remove', value: midA[i] });
-      i++;
-    }
-    while (j < n) {
-      tokens.push({ type: 'add', value: midB[j] });
-      j++;
-    }
+  } else {
+    runWordLcsDp(midA, midB, tokens);
   }
 
   if (endA + 1 < a.length) {

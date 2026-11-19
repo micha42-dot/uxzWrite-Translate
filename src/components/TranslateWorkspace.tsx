@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   ArrowLeftRight,
@@ -65,10 +65,10 @@ interface TranslateWorkspaceProps {
 }
 
 const SAMPLE_TRANSLATE_TEXT_DE =
-  'Guten Tag, wir freuen uns sehr über Ihr Interesse an unserem neuen Projekt zur automatisierten Textverarbeitung. Bitte lassen Sie uns wissen, wann es Ihnen für ein kurzes Abstimmungsgespräch am besten passt.';
+  'Sam Altman, Dario Amodei und Elon Musk gehen in eine Bar. Sam bestellt eine Runde für alle und verspricht dem Barkeeper, dass das nächste Bier die ganze Welt verändern wird. Dario studiert erst einmal zwanzig Minuten lang die Warnhinweise auf dem Bierdeckel, falls ein Schluck doch zu gefährlich sein sollte. Und Elon kauft kurzerhand die Bar, benennt sie in „X“ um und feuert den Zapfhahn, weil das Getränkeausschenken eigentlich auch ohne Personal klappt.';
 
 const SAMPLE_TRANSLATE_TEXT_EN =
-  'Hello, we are delighted by your interest in our new project on automated text processing. Please let us know what time works best for a brief alignment call.';
+  'Sam Altman, Dario Amodei, and Elon Musk walk into a bar. Sam orders a round for the house and promises the bartender that the next pint will transform all of humanity. Dario spends twenty minutes inspecting the coaster’s safety disclaimers just in case a single sip poses an existential risk. Meanwhile, Elon buys the pub, renames it "X", and fires the tap handle because pouring beer really ought to be done from first principles.';
 
 export function TranslateWorkspace({
   status,
@@ -166,18 +166,23 @@ export function TranslateWorkspace({
     return `${termsSig}#${rulesSig}`;
   }, [preferences]);
 
-  const sourceStats = useMemo(() => countTextStats(sourceText), [sourceText]);
-  const translatedStats = useMemo(() => countTextStats(translatedText), [translatedText]);
+  const deferredSourceText = useDeferredValue(sourceText);
+  const deferredTranslatedText = useDeferredValue(translatedText);
+
+  const sourceStats = useMemo(() => countTextStats(deferredSourceText), [deferredSourceText]);
+  const translatedStats = useMemo(() => countTextStats(deferredTranslatedText), [deferredTranslatedText]);
 
   const diffResult = useMemo(() => {
-    if (!translatedText || isStreaming) return { tokens: [], addedCount: 0, removedCount: 0, changeCount: 0 };
-    return computeWordDiff(sourceText, translatedText);
-  }, [sourceText, translatedText, isStreaming]);
+    if (outputView !== 'diff' || !deferredTranslatedText || isStreaming) {
+      return { tokens: [], addedCount: 0, removedCount: 0, changeCount: 0 };
+    }
+    return computeWordDiff(deferredSourceText, deferredTranslatedText);
+  }, [outputView, deferredSourceText, deferredTranslatedText, isStreaming]);
 
   const sentenceSpans = useMemo(() => {
-    if (!translatedText || isStreaming) return [];
-    return splitIntoSentenceSpans(translatedText);
-  }, [translatedText, isStreaming]);
+    if (outputView !== 'clean' || !deferredTranslatedText || isStreaming) return [];
+    return splitIntoSentenceSpans(deferredTranslatedText);
+  }, [outputView, deferredTranslatedText, isStreaming]);
 
   const runTranslate = useCallback(
     async (textToProcess: string, sLang: SourceLanguageId, tLang: TargetLanguageId, tTone: TranslationTone) => {
@@ -397,6 +402,14 @@ export function TranslateWorkspace({
   useEffect(() => {
     if (!instantMode || !status.configured) return;
     if (!sourceText.trim()) {
+      if (abortRef.current) {
+        abortRef.current.abort();
+        abortRef.current = null;
+        setIsStreaming(false);
+        setActiveRunModel(null);
+        setChunkProgress(null);
+        setRateLimitNotice(null);
+      }
       lastSignatureRef.current = '';
       onChangeTranslatedText('');
       return;
@@ -404,6 +417,17 @@ export function TranslateWorkspace({
 
     const signature = `${sourceLang}|${targetLang}|${tone}|${status.model}|${preferencesSignature}|${sourceText}`;
     if (signature === lastSignatureRef.current) return;
+
+    // Abort stale in-flight translation immediately when input changes
+    if (abortRef.current) {
+      abortRef.current.abort();
+      abortRef.current = null;
+      lastSignatureRef.current = '';
+      setIsStreaming(false);
+      setActiveRunModel(null);
+      setChunkProgress(null);
+      setRateLimitNotice(null);
+    }
 
     const wsSettings = preferences.settings ?? DEFAULT_WORKSPACE_SETTINGS;
     const delay = pasteTriggeredRef.current ? wsSettings.pasteDebounceMs : wsSettings.typingDebounceMs;
@@ -432,6 +456,7 @@ export function TranslateWorkspace({
     if (abortRef.current) {
       abortRef.current.abort();
       abortRef.current = null;
+      lastSignatureRef.current = '';
     }
     setRateLimitNotice(null);
     setIsStreaming(false);
